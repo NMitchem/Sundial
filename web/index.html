@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sundial — LP on your GPU, in your browser</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+      #hud span { display: inline-block; margin-right: 1.2rem; font-variant-numeric: tabular-nums; }
+      canvas { width: 100%; height: 320px; border: 1px solid #8884; border-radius: 6px; }
+      #nogpu { color: #b00; }
+      button { padding: .4rem 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Sundial</h1>
+    <p>A linear-programming solver running as WebGPU compute shaders on <em>your</em> GPU. No server, no install.
+       Reported tolerances are re-verified on the CPU in f64 — the GPU never grades its own homework.</p>
+    <p id="nogpu" hidden>This browser has no WebGPU. Chrome/Edge 113+, Firefox 141+, or Safari 26+ required.</p>
+    <p>
+      <select id="instance">
+        <option value="afiro">afiro (27×32)</option>
+        <option value="sc50a">sc50a</option>
+        <option value="sc50b">sc50b</option>
+        <option value="adlittle">adlittle</option>
+        <option value="share2b">share2b</option>
+      </select>
+      <button id="solve">Solve on GPU</button>
+    </p>
+    <div id="hud">
+      <span id="gpu"></span><span id="iter"></span><span id="msit"></span><span id="status"></span>
+    </div>
+    <canvas id="chart" width="1600" height="640"></canvas>
+    <p id="result"></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

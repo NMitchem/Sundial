@@ -197,6 +197,7 @@ impl Default for SolveOptions {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(target_arch = "wasm32", derive(serde::Serialize))]
 pub struct ProgressEvent {
     pub iter: u64,
     pub rel_primal: f64,

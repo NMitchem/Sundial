@@ -2,3 +2,4 @@
 web/node_modules
 web/dist
 crates/sundial-core/pkg
+crates/sundial-mps/pkg
