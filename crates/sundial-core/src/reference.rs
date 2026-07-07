@@ -1,1 +1,185 @@
+//! CPU f64 reference implementation of restarted PDHG (the "Math conventions"
+//! block of the M0 plan, executable). The GPU engine mirrors this loop exactly.
+use crate::kkt::{self, KktResiduals};
+use crate::problem::*;
+use crate::scale;
+use web_time::Instant;
 
+pub fn power_iteration_norm(a: &CsrMatrix, at: &CsrMatrix, iters: usize, seed: u64) -> f64 {
+    let mut rng = fastrand::Rng::with_seed(seed);
+    let n = a.n_cols;
+    let mut v: Vec<f64> = (0..n).map(|_| rng.f64() - 0.5).collect();
+    let mut av = vec![0.0; a.n_rows];
+    let mut atav = vec![0.0; n];
+    let mut lambda = 0.0f64;
+    for _ in 0..iters {
+        let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-30);
+        v.iter_mut().for_each(|x| *x /= norm);
+        a.mul(&v, &mut av);
+        at.mul(&av, &mut atav);
+        lambda = v.iter().zip(&atav).map(|(a, b)| a * b).sum::<f64>(); // Rayleigh quotient for AᵀA
+        std::mem::swap(&mut v, &mut atav);
+    }
+    lambda.max(1e-30).sqrt() // ‖A‖₂ = sqrt(λ_max(AᵀA))
+}
+
+struct State {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    x_avg: Vec<f64>,
+    y_avg: Vec<f64>,
+    avg_count: u64,
+}
+
+impl State {
+    /// Restart: optionally adopt the running average as the current iterate,
+    /// then reset the average to the current iterate.
+    fn restart_from(&mut self, from_avg: bool) {
+        if from_avg {
+            self.x.copy_from_slice(&self.x_avg);
+            self.y.copy_from_slice(&self.y_avg);
+        }
+        self.x_avg.copy_from_slice(&self.x);
+        self.y_avg.copy_from_slice(&self.y);
+        self.avg_count = 1;
+    }
+}
+
+pub fn solve(
+    p: &LpProblem,
+    opts: &SolveOptions,
+    progress: &mut dyn FnMut(ProgressEvent),
+) -> Solution {
+    let start = Instant::now();
+    let (sp, s) = scale::ruiz_pc(p, 10);
+    let (m, n) = (sp.n_cons(), sp.n_vars());
+
+    let norm_a = power_iteration_norm(&sp.a, &sp.at, 100, opts.seed);
+    let tau = 0.9 / norm_a;
+    let sigma = 0.9 / norm_a;
+
+    let mut st = State {
+        x: vec![0.0; n],
+        y: vec![0.0; m],
+        x_avg: vec![0.0; n],
+        y_avg: vec![0.0; m],
+        avg_count: 1,
+    };
+    // start feasible w.r.t. boxes: clamp 0 into [l_v, u_v]
+    for j in 0..n {
+        st.x[j] = 0.0f64.clamp(sp.col_lower[j], sp.col_upper[j]);
+    }
+    st.x_avg.copy_from_slice(&st.x);
+
+    let mut aty = vec![0.0; n];
+    let mut axt = vec![0.0; m];
+    let mut x_new = vec![0.0; n];
+    let mut x_tilde = vec![0.0; n];
+
+    let mut mu_last_restart = f64::INFINITY;
+    let mut iters_since_restart: u64 = 0;
+    let mut restarts: u32 = 0;
+    let mut status = SolveStatus::IterationLimit;
+    let mut iter: u64 = 0;
+    let mut last_check_time = Instant::now();
+    let mut last_check_iter: u64 = 0;
+
+    while iter < opts.max_iters {
+        // one PDHG iteration (see Math conventions)
+        sp.at.mul(&st.y, &mut aty);
+        for j in 0..n {
+            let v = st.x[j] - tau * (sp.c[j] + aty[j]);
+            let xn = v.clamp(sp.col_lower[j], sp.col_upper[j]);
+            x_new[j] = xn;
+            x_tilde[j] = 2.0 * xn - st.x[j];
+        }
+        sp.a.mul(&x_tilde, &mut axt);
+        for (i, y_i) in st.y.iter_mut().enumerate() {
+            let v = *y_i + sigma * axt[i];
+            *y_i = v - sigma * (v / sigma).clamp(sp.row_lower[i], sp.row_upper[i]);
+        }
+        std::mem::swap(&mut st.x, &mut x_new);
+        iter += 1;
+        iters_since_restart += 1;
+
+        // incremental running average
+        st.avg_count += 1;
+        let w = 1.0 / st.avg_count as f64;
+        for j in 0..n {
+            st.x_avg[j] += w * (st.x[j] - st.x_avg[j]);
+        }
+        for i in 0..m {
+            st.y_avg[i] += w * (st.y[i] - st.y_avg[i]);
+        }
+
+        if iter.is_multiple_of(opts.check_every as u64) {
+            if st.x.iter().any(|v| !v.is_finite()) || st.y.iter().any(|v| !v.is_finite()) {
+                status = SolveStatus::NumericalBreakdown;
+                break;
+            }
+            // IMPORTANT: residuals for termination/restart are evaluated on the
+            // ORIGINAL problem (scaled-space residuals passing tol does NOT
+            // imply the real ones do). Unscale candidates first.
+            let r_cur = kkt::residuals(p, &s.unscale_x(&st.x), &s.unscale_y(&st.y));
+            let r_avg = kkt::residuals(p, &s.unscale_x(&st.x_avg), &s.unscale_y(&st.y_avg));
+            let (mu_cand, cand_is_avg) = if r_avg.mu() < r_cur.mu() {
+                (r_avg.mu(), true)
+            } else {
+                (r_cur.mu(), false)
+            };
+
+            let now = Instant::now();
+            let ms_per_iter = now.duration_since(last_check_time).as_secs_f64() * 1000.0
+                / (iter - last_check_iter).max(1) as f64;
+            last_check_time = now;
+            last_check_iter = iter;
+            progress(ProgressEvent {
+                iter,
+                rel_primal: r_cur.rel_primal,
+                rel_dual: r_cur.rel_dual,
+                rel_gap: r_cur.rel_gap,
+                ms_per_iter,
+            });
+
+            if mu_cand <= opts.tol {
+                if cand_is_avg {
+                    st.restart_from(true);
+                }
+                status = SolveStatus::Optimal;
+                break;
+            }
+            // restart rule
+            if mu_cand <= 0.5 * mu_last_restart || iters_since_restart >= 4096 {
+                st.restart_from(cand_is_avg);
+                mu_last_restart = mu_cand;
+                iters_since_restart = 0;
+                restarts += 1;
+            }
+            if let Some(limit) = opts.time_limit_ms {
+                if start.elapsed().as_secs_f64() * 1000.0 > limit {
+                    status = SolveStatus::TimeLimit;
+                    break;
+                }
+            }
+        }
+    }
+
+    // unscale and record the authoritative f64 verification on the ORIGINAL problem
+    let x = s.unscale_x(&st.x);
+    let y = s.unscale_y(&st.y);
+    let verified: KktResiduals = kkt::residuals(p, &x, &y);
+    debug_assert!(status != SolveStatus::Optimal || verified.mu() <= opts.tol);
+    let primal_obj = verified.primal_obj;
+    Solution {
+        x,
+        y,
+        primal_obj,
+        status,
+        stats: SolveStats {
+            iterations: iter,
+            restarts,
+            solve_ms: start.elapsed().as_secs_f64() * 1000.0,
+            verified,
+        },
+    }
+}
