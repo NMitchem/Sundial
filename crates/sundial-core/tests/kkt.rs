@@ -1,3 +1,4 @@
+use sundial_core::problem::{CsrMatrix, LpProblem};
 use sundial_core::{kkt, testgen};
 
 #[test]
@@ -58,6 +59,40 @@ fn gap_stays_finite_with_noise_on_open_bounds() {
     for yi in y.iter_mut() {
         *yi += 1e-9;
     }
+    let r = kkt::residuals(&p, &x, &y);
+    assert!(r.dual_obj.is_finite(), "dual_obj = {}", r.dual_obj);
+    assert!(r.rel_gap.is_finite(), "rel_gap = {}", r.rel_gap);
+    assert!(r.mu().is_finite());
+}
+
+#[test]
+fn gap_stays_finite_with_negative_reduced_cost_on_open_upper_bound() {
+    // Hand-built 1x1 LP exercising the column-side (bound_terms) guard in
+    // kkt::residuals, mirroring gap_stays_finite_with_noise_on_open_bounds but
+    // deterministically instead of via random perturbation. col_upper is open
+    // (+inf) and y is chosen so the reduced cost g = c + Aᵀy = 1 + (-2) = -1 < 0,
+    // which selects the g<0 branch that multiplies by col_upper. Without the
+    // `p.col_upper[j].is_finite()` guard this yields -1 * +inf = -inf.
+    let a = CsrMatrix {
+        n_rows: 1,
+        n_cols: 1,
+        indptr: vec![0, 1],
+        indices: vec![0],
+        values: vec![1.0],
+    };
+    let p = LpProblem::new(
+        "colside".into(),
+        a,
+        vec![1.0],               // c
+        0.0,                     // obj_offset
+        vec![f64::NEG_INFINITY], // row_lower
+        vec![10.0],              // row_upper
+        vec![0.0],               // col_lower
+        vec![f64::INFINITY],     // col_upper (open upper bound)
+    )
+    .unwrap();
+    let x = vec![1.0];
+    let y = vec![-2.0];
     let r = kkt::residuals(&p, &x, &y);
     assert!(r.dual_obj.is_finite(), "dual_obj = {}", r.dual_obj);
     assert!(r.rel_gap.is_finite(), "rel_gap = {}", r.rel_gap);
