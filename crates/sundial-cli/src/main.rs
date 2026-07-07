@@ -1,3 +1,200 @@
-fn main() {
-    println!("sundial 0.1.0");
+use anyhow::{bail, Context, Result};
+use clap::{Parser, Subcommand, ValueEnum};
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+use sundial_core::problem::{ProgressEvent, Solution, SolveOptions};
+
+#[derive(Parser)]
+#[command(
+    name = "sundial",
+    version,
+    about = "WebGPU-native LP solver (restarted PDHG)"
+)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Engine {
+    Gpu,
+    Cpu,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Solve a single MPS file
+    Solve {
+        file: PathBuf,
+        #[arg(long, default_value_t = 1e-4)]
+        tol: f64,
+        #[arg(long, value_enum, default_value_t = Engine::Gpu)]
+        engine: Engine,
+        #[arg(long, default_value_t = 2_000_000)]
+        max_iters: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Solve every *.mps / *.mps.gz in a directory, write a CSV
+    Bench {
+        dir: PathBuf,
+        #[arg(long, default_value_t = 1e-4)]
+        tol: f64,
+        #[arg(long, value_enum, default_value_t = Engine::Gpu)]
+        engine: Engine,
+        #[arg(long, default_value = "results.csv")]
+        out: PathBuf,
+    },
+}
+
+#[derive(Serialize)]
+struct Report<'a> {
+    name: &'a str,
+    status: String,
+    objective: f64,
+    iterations: u64,
+    restarts: u32,
+    solve_ms: f64,
+    rel_primal: f64,
+    rel_dual: f64,
+    rel_gap: f64,
+}
+
+fn report<'a>(name: &'a str, s: &Solution) -> Report<'a> {
+    Report {
+        name,
+        status: format!("{:?}", s.status),
+        objective: s.primal_obj,
+        iterations: s.stats.iterations,
+        restarts: s.stats.restarts,
+        solve_ms: s.stats.solve_ms,
+        rel_primal: s.stats.verified.rel_primal,
+        rel_dual: s.stats.verified.rel_dual,
+        rel_gap: s.stats.verified.rel_gap,
+    }
+}
+
+fn solve_file(
+    path: &Path,
+    tol: f64,
+    max_iters: u64,
+    engine: Engine,
+    quiet: bool,
+) -> Result<Solution> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let p =
+        sundial_mps::parse_bytes(&bytes).with_context(|| format!("parsing {}", path.display()))?;
+    let opts = SolveOptions {
+        tol,
+        max_iters,
+        ..Default::default()
+    };
+    let mut on_progress = |e: ProgressEvent| {
+        if !quiet {
+            eprintln!(
+                "iter {:>8}  primal {:.2e}  dual {:.2e}  gap {:.2e}  {:.3} ms/iter",
+                e.iter, e.rel_primal, e.rel_dual, e.rel_gap, e.ms_per_iter
+            );
+        }
+    };
+    Ok(match engine {
+        Engine::Cpu => sundial_core::reference::solve(&p, &opts, &mut on_progress),
+        Engine::Gpu => {
+            let ctx = pollster::block_on(sundial_core::gpu::GpuContext::new())
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            eprintln!(
+                "GPU: {} (max binding {} MiB)",
+                ctx.adapter_name, ctx.max_binding_mib
+            );
+            pollster::block_on(sundial_core::gpu::engine::solve_gpu(
+                &ctx,
+                &p,
+                &opts,
+                &mut on_progress,
+            ))
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+        }
+    })
+}
+
+fn main() -> Result<()> {
+    match Cli::parse().cmd {
+        Cmd::Solve {
+            file,
+            tol,
+            engine,
+            max_iters,
+            json,
+        } => {
+            let sol = solve_file(&file, tol, max_iters, engine, json)?;
+            let name = file.file_stem().unwrap_or_default().to_string_lossy();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report(&name, &sol))?);
+            } else {
+                println!(
+                    "{name}: {:?}  obj {:.10}  ({} iters, {} restarts, {:.0} ms, verified mu {:.2e})",
+                    sol.status, sol.primal_obj, sol.stats.iterations, sol.stats.restarts,
+                    sol.stats.solve_ms, sol.stats.verified.mu()
+                );
+            }
+            if sol.status != sundial_core::problem::SolveStatus::Optimal {
+                bail!("not solved to tolerance");
+            }
+        }
+        Cmd::Bench {
+            dir,
+            tol,
+            engine,
+            out,
+        } => {
+            let mut rows = vec![
+                "name,status,objective,iterations,solve_ms,rel_primal,rel_dual,rel_gap".to_string(),
+            ];
+            let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| {
+                    p.to_string_lossy().ends_with(".mps")
+                        || p.to_string_lossy().ends_with(".mps.gz")
+                })
+                .collect();
+            files.sort();
+            if files.is_empty() {
+                bail!("no .mps files in {}", dir.display());
+            }
+            for f in files {
+                let name = f
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                match solve_file(&f, tol, 2_000_000, engine, true) {
+                    Ok(s) => {
+                        let r = report(&name, &s);
+                        println!(
+                            "{name}: {} obj {:.6} ({:.0} ms)",
+                            r.status, r.objective, r.solve_ms
+                        );
+                        rows.push(format!(
+                            "{},{},{},{},{:.1},{:.3e},{:.3e},{:.3e}",
+                            r.name,
+                            r.status,
+                            r.objective,
+                            r.iterations,
+                            r.solve_ms,
+                            r.rel_primal,
+                            r.rel_dual,
+                            r.rel_gap
+                        ));
+                    }
+                    Err(e) => {
+                        println!("{name}: ERROR {e}");
+                        rows.push(format!("{name},Error,,,,,,"));
+                    }
+                }
+            }
+            std::fs::write(&out, rows.join("\n") + "\n")?;
+            println!("wrote {}", out.display());
+        }
+    }
+    Ok(())
 }
