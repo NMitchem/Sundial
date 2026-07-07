@@ -19,18 +19,10 @@ fn norm2(v: impl Iterator<Item = f64>) -> f64 {
     v.map(|a| a * a).sum::<f64>().sqrt()
 }
 
-pub fn residuals(p: &LpProblem, x: &[f64], y: &[f64]) -> KktResiduals {
-    let (m, n) = (p.n_cons(), p.n_vars());
-    assert_eq!(x.len(), n);
-    assert_eq!(y.len(), m);
-
-    let mut ax = vec![0.0; m];
-    p.a.mul(x, &mut ax);
-    let mut aty = vec![0.0; n];
-    p.at.mul(y, &mut aty);
-
-    // primal residual
-    let r_p = (0..m).map(|i| ax[i] - ax[i].clamp(p.row_lower[i], p.row_upper[i]));
+/// ORIGINAL-space relative-residual denominators `(q_norm, c_norm)`, extracted
+/// verbatim from `residuals()` so the GPU engine can reuse the exact f64 values.
+pub fn denominators(p: &LpProblem) -> (f64, f64) {
+    let m = p.n_cons();
     let q_norm = norm2((0..m).map(|i| {
         let l = if p.row_lower[i].is_finite() {
             p.row_lower[i].abs()
@@ -44,6 +36,24 @@ pub fn residuals(p: &LpProblem, x: &[f64], y: &[f64]) -> KktResiduals {
         };
         l.max(u)
     }));
+    let c_norm = norm2(p.c.iter().copied());
+    (q_norm, c_norm)
+}
+
+pub fn residuals(p: &LpProblem, x: &[f64], y: &[f64]) -> KktResiduals {
+    let (m, n) = (p.n_cons(), p.n_vars());
+    assert_eq!(x.len(), n);
+    assert_eq!(y.len(), m);
+
+    let mut ax = vec![0.0; m];
+    p.a.mul(x, &mut ax);
+    let mut aty = vec![0.0; n];
+    p.at.mul(y, &mut aty);
+
+    let (q_norm, c_norm) = denominators(p);
+
+    // primal residual
+    let r_p = (0..m).map(|i| ax[i] - ax[i].clamp(p.row_lower[i], p.row_upper[i]));
     let rel_primal = norm2(r_p) / (1.0 + q_norm);
 
     // dual residual + dual objective bound-terms
@@ -57,7 +67,7 @@ pub fn residuals(p: &LpProblem, x: &[f64], y: &[f64]) -> KktResiduals {
             g[j]
         }
     });
-    let rel_dual = norm2(r_d) / (1.0 + norm2(p.c.iter().copied()));
+    let rel_dual = norm2(r_d) / (1.0 + c_norm);
 
     let primal_obj = p.obj_offset + (0..n).map(|j| p.c[j] * x[j]).sum::<f64>();
     let bound_terms: f64 = (0..n)
