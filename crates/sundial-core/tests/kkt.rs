@@ -41,3 +41,25 @@ fn csr_transpose_roundtrip() {
         assert!((ax[i] - attx[i]).abs() < 1e-12);
     }
 }
+
+#[test]
+fn gap_stays_finite_with_noise_on_open_bounds() {
+    // Standard-form-style LP: some rows/cols carry an open (infinite) bound on
+    // one side while the true multiplier sits exactly at the other (e.g. an
+    // "inactive" row with y*=0 and row_upper=+inf). A slightly-perturbed dual
+    // that pushes such a multiplier across zero must NOT poison the dual
+    // objective: D stays finite, rel_gap is a real (enforced) number, mu is
+    // finite. (Old buggy formula: seed 42 with this exact perturbation drives
+    // dual_obj to -inf — see task-9-report.md "Gap-enforcement fix" for the
+    // RED evidence.)
+    let (p, x, mut y, _) = testgen::generate(42, 40, 25);
+    // perturb duals slightly so reduced costs / row multipliers pick up
+    // wrong-sign noise against open bounds
+    for yi in y.iter_mut() {
+        *yi += 1e-9;
+    }
+    let r = kkt::residuals(&p, &x, &y);
+    assert!(r.dual_obj.is_finite(), "dual_obj = {}", r.dual_obj);
+    assert!(r.rel_gap.is_finite(), "rel_gap = {}", r.rel_gap);
+    assert!(r.mu().is_finite());
+}

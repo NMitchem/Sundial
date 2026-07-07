@@ -70,11 +70,15 @@ pub fn residuals(p: &LpProblem, x: &[f64], y: &[f64]) -> KktResiduals {
     let rel_dual = norm2(r_d) / (1.0 + c_norm);
 
     let primal_obj = p.obj_offset + (0..n).map(|j| p.c[j] * x[j]).sum::<f64>();
+    // Projected-multiplier dual objective: a term whose bound is non-finite
+    // contributes 0 (the dual-infeasible component is projected out of D and
+    // reported in r_d instead). See "Math conventions" — an f64 ±inf here
+    // would make rel_gap NaN, which f64::max silently drops from mu.
     let bound_terms: f64 = (0..n)
         .map(|j| {
-            if g[j] > 0.0 {
-                g[j] * p.col_lower[j] // -inf here => dual obj -inf (honest)
-            } else if g[j] < 0.0 {
+            if g[j] > 0.0 && p.col_lower[j].is_finite() {
+                g[j] * p.col_lower[j]
+            } else if g[j] < 0.0 && p.col_upper[j].is_finite() {
                 g[j] * p.col_upper[j]
             } else {
                 0.0
@@ -83,9 +87,9 @@ pub fn residuals(p: &LpProblem, x: &[f64], y: &[f64]) -> KktResiduals {
         .sum();
     let row_terms: f64 = (0..m)
         .map(|i| {
-            if y[i] > 0.0 {
+            if y[i] > 0.0 && p.row_upper[i].is_finite() {
                 p.row_upper[i] * y[i]
-            } else if y[i] < 0.0 {
+            } else if y[i] < 0.0 && p.row_lower[i].is_finite() {
                 p.row_lower[i] * y[i]
             } else {
                 0.0
