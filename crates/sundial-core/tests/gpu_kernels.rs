@@ -160,3 +160,102 @@ fn reduce_dot_one_million_matches_f64() {
         "dot: gpu {got} vs f64 {want}"
     );
 }
+
+// Projected-gap guards: a dual-objective term whose sign-relevant bound is the
+// open ±1e30 sentinel must contribute EXACTLY 0 (never leak 1e30 × dual), while
+// the dual residual `rd` still reports the infeasible component unchanged.
+#[test]
+#[ignore = "requires GPU"]
+fn residual_terms_project_open_bounds_to_zero() {
+    let c = ctx();
+    let k = kernels::Kernels::new(&c.device);
+    let inf = 1e30f32;
+    let params = || kernels::ParamsData {
+        n: 4,
+        stride: 0,
+        tau: 0.0,
+        sigma: 0.0,
+        w: 0.0,
+    };
+    let b = |d: &[f32], l: &str| buffers::storage_f32(&c.device, d, l);
+
+    // dual_res_terms: in_a=aty in_b=c in_c=lv in_d=uv out_a=rd out_b=bterm
+    // j0: g>0, finite lower  -> absorbed (rd=0), bterm=g*lv
+    // j1: g>0, OPEN lower     -> rd=g, bterm=0 (guarded)
+    // j2: g<0, finite upper  -> absorbed (rd=0), bterm=g*uv
+    // j3: g<0, OPEN upper     -> rd=g, bterm=0 (guarded)
+    let aty = [0.0f32; 4];
+    let cv = [1.0f32, 2.0, -1.5, -3.0];
+    let lv = [0.5f32, -inf, -inf, -inf];
+    let uv = [inf, inf, 0.8, inf];
+    let exp_rd = [0.0f32, 2.0, 0.0, -3.0];
+    let exp_bt = [0.5f32, 0.0, -1.2, 0.0];
+    let (b_aty, b_c, b_lv, b_uv) = (b(&aty, "aty"), b(&cv, "c"), b(&lv, "lv"), b(&uv, "uv"));
+    let b_rd = buffers::storage_zeros_f32(&c.device, 4, "rd");
+    let b_bt = buffers::storage_zeros_f32(&c.device, 4, "bterm");
+    run_once(
+        &c,
+        &k,
+        "dual_res_terms",
+        params(),
+        &[
+            (1, &b_aty),
+            (2, &b_c),
+            (3, &b_lv),
+            (4, &b_uv),
+            (6, &b_rd),
+            (7, &b_bt),
+        ],
+        1,
+    );
+    let got_rd = pollster::block_on(buffers::readback_f32(&c.device, &c.queue, &b_rd, 4));
+    let got_bt = pollster::block_on(buffers::readback_f32(&c.device, &c.queue, &b_bt, 4));
+    for j in 0..4 {
+        assert!(
+            (got_rd[j] - exp_rd[j]).abs() <= 1e-6,
+            "rd[{j}]={} want {}",
+            got_rd[j],
+            exp_rd[j]
+        );
+        assert!(
+            (got_bt[j] - exp_bt[j]).abs() <= 1e-4,
+            "bterm[{j}]={} want {}",
+            got_bt[j],
+            exp_bt[j]
+        );
+    }
+    // open-bound columns: exactly 0 (no sentinel leak), and rd == g unchanged
+    assert_eq!(got_bt[1], 0.0);
+    assert_eq!(got_bt[3], 0.0);
+    assert_eq!(got_rd[1], cv[1] + aty[1]);
+    assert_eq!(got_rd[3], cv[3] + aty[3]);
+
+    // row_terms: in_a=y in_b=lc in_c=uc out_a=rterm
+    // i0: y>0, finite upper -> uc*y ; i1: y>0, OPEN upper -> 0 (guarded)
+    // i2: y<0, finite lower -> lc*y ; i3: y<0, OPEN lower -> 0 (guarded)
+    let y = [0.5f32, 0.5, -0.4, -0.3];
+    let lc = [-inf, -3.0, -1.0, -inf];
+    let uc = [2.0f32, inf, inf, 5.0];
+    let exp_rt = [1.0f32, 0.0, 0.4, 0.0];
+    let (b_y, b_lc, b_uc) = (b(&y, "y"), b(&lc, "lc"), b(&uc, "uc"));
+    let b_rt = buffers::storage_zeros_f32(&c.device, 4, "rterm");
+    run_once(
+        &c,
+        &k,
+        "row_terms",
+        params(),
+        &[(1, &b_y), (2, &b_lc), (3, &b_uc), (6, &b_rt)],
+        1,
+    );
+    let got_rt = pollster::block_on(buffers::readback_f32(&c.device, &c.queue, &b_rt, 4));
+    for i in 0..4 {
+        assert!(
+            (got_rt[i] - exp_rt[i]).abs() <= 1e-6,
+            "rterm[{i}]={} want {}",
+            got_rt[i],
+            exp_rt[i]
+        );
+    }
+    assert_eq!(got_rt[1], 0.0);
+    assert_eq!(got_rt[3], 0.0);
+}

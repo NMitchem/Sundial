@@ -21,7 +21,13 @@ fn primal_res(@builtin(global_invocation_id) gid: vec3<u32>) {
     out_a[i] = v - clamp(v, in_b[i], in_c[i]);
 }
 
-// g = c + aty; rd per absorption rule; bterm for dual objective
+// g = c + aty; rd per absorption rule; bterm for dual objective.
+// PROJECTED-GAP SEMANTICS: when the bound a term would multiply is not finite,
+// the contribution is 0 — this evaluates the dual objective at the sign-cone
+// PROJECTION of the dual candidate (noise g>0 against l=-inf is dual-infeasible
+// noise; rd still reports it, but the gap is computed as if it were projected
+// to 0). Matches the CPU f64 gate, which verifies at the projected dual, and
+// avoids all inf arithmetic in shaders (sentinel comparisons only).
 // in_a=aty_orig  in_b=c  in_c=lv  in_d=uv  out_a=rd  out_b=bterm
 @compute @workgroup_size(256)
 fn dual_res_terms(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -35,19 +41,23 @@ fn dual_res_terms(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (g < 0.0 && u_fin) { rd = 0.0; }
     out_a[j] = rd;
     var bt = 0.0;
-    if (g > 0.0) { bt = g * in_c[j]; }
-    if (g < 0.0) { bt = g * in_d[j]; }
+    if (g > 0.0 && l_fin) { bt = g * in_c[j]; }
+    if (g < 0.0 && u_fin) { bt = g * in_d[j]; }
     out_b[j] = bt;
 }
 
-// rterm[i] = y>0 ? uc·y : y<0 ? lc·y : 0    in_a=y_orig  in_b=lc  in_c=uc  out_a=rterm
+// rterm[i] = y>0 ? uc·y : y<0 ? lc·y : 0, with the same projected-gap rule:
+// a non-finite bound contributes 0 (dual-infeasible noise projected out).
+// in_a=y_orig  in_b=lc  in_c=uc  out_a=rterm
 @compute @workgroup_size(256)
 fn row_terms(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
     if (i >= P.n) { return; }
     let y = in_a[i];
+    let l_fin = in_b[i] > -INF_THRESH;
+    let u_fin = in_c[i] < INF_THRESH;
     var t = 0.0;
-    if (y > 0.0) { t = in_c[i] * y; }
-    if (y < 0.0) { t = in_b[i] * y; }
+    if (y > 0.0 && u_fin) { t = in_c[i] * y; }
+    if (y < 0.0 && l_fin) { t = in_b[i] * y; }
     out_a[i] = t;
 }

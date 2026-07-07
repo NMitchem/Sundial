@@ -67,31 +67,19 @@ pub async fn solve_gpu(
     let lc_s = b_f(&pack_f32_inf_sentinel(&sp.row_lower), "lc_s");
     let uc_s = b_f(&pack_f32_inf_sentinel(&sp.row_upper), "uc_s");
 
-    // ORIGINAL-space data for residual evaluation. Bounds use TRUE ±∞ here (not the
-    // 1e30 iterate sentinel): the dual objective's row/bound terms multiply an open
-    // bound by its dual, and a wrong-sign dual against an open bound must send the
-    // dual objective to −∞ so the gap drops out of `mu` as NaN (ignored by
-    // `f64::max`) — exactly as the f64 `kkt::residuals` reference does. The finite
-    // 1e30 sentinel would instead inject a spurious ~1e22 term (1e30 × f32 dual
-    // noise) and pin rel_gap at 1.0, so the GPU would never trigger verification.
-    let pack_inf = |v: &[f64]| -> Vec<f32> {
-        v.iter()
-            .map(|&x| {
-                if x == f64::INFINITY {
-                    f32::INFINITY
-                } else if x == f64::NEG_INFINITY {
-                    f32::NEG_INFINITY
-                } else {
-                    x as f32
-                }
-            })
-            .collect()
-    };
+    // ORIGINAL-space data for residual evaluation. Bounds use the SAME 1e30
+    // sentinel as the iterate bounds (no true ±∞ in GPU buffers — WGSL may assume
+    // finite math, so ±∞ is not portable across browser backends). The residual
+    // kernels never multiply a non-finite bound: `dual_res_terms`/`row_terms` guard
+    // every bound term by its INF_THRESH finiteness flag, computing the gap at the
+    // sign-cone projection of the dual — identical semantics to the host
+    // `project_dual` f64 gate, so the GPU trigger and the CPU verdict agree and
+    // `rel_gap` stays finite for progress events.
     let c_o = b_f(&f32v(&p.c), "c_o");
-    let lv_o = b_f(&pack_inf(&p.col_lower), "lv_o");
-    let uv_o = b_f(&pack_inf(&p.col_upper), "uv_o");
-    let lc_o = b_f(&pack_inf(&p.row_lower), "lc_o");
-    let uc_o = b_f(&pack_inf(&p.row_upper), "uc_o");
+    let lv_o = b_f(&pack_f32_inf_sentinel(&p.col_lower), "lv_o");
+    let uv_o = b_f(&pack_f32_inf_sentinel(&p.col_upper), "uv_o");
+    let lc_o = b_f(&pack_f32_inf_sentinel(&p.row_lower), "lc_o");
+    let uc_o = b_f(&pack_f32_inf_sentinel(&p.row_upper), "uc_o");
     let dr = b_f(&f32v(&s.row), "dr");
     let dr_inv = b_f(
         &f32v(&s.row.iter().map(|v| 1.0 / v).collect::<Vec<_>>()),
