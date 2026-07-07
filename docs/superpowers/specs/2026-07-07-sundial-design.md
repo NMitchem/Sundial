@@ -95,7 +95,7 @@ transport UI ─→ generator ─→ matrix-free problem ┤→ scaling (Ruiz + 
 Restarted PDHG on the LP saddle-point problem, PDLP standard form. Per iteration: one `Ax`, one `Aᵀy`, vector updates, box projections — all O(nnz)/O(n), no factorizations.
 
 **Enhancement ladder (build in this order):**
-1. Ruiz equilibration (~10 iterations) + Pock-Chambolle diagonal scaling — host-side preprocessing.
+1. Ruiz equilibration (~10 iterations) + Pock-Chambolle diagonal scaling — host-side preprocessing. Applies to explicit problems; matrix-free problems supply analytic scaling factors or opt out (the transport operator is an all-ones incidence structure — already perfectly balanced, no scaling needed).
 2. **Adaptive restarts** on normalized duality-gap decay (classic PDLP policy) — the biggest convergence lever. `RestartPolicy` trait; Halpern/reflected variant added second; empirical winner ships as default.
 3. Primal-weight balancing (adapt τ/σ ratio from residual balance at restarts).
 4. Step size from power-iteration estimate of ‖A‖ (GPU); Malitsky-Pock adaptive steps only if fixed steps underperform.
@@ -106,7 +106,7 @@ Restarted PDHG on the LP saddle-point problem, PDLP standard form. Per iteration
 
 **Correctness oracles:**
 - Constructed-KKT LPs: generate (x*, y*) satisfying optimality conditions, derive problem data → exact known optimum, no external solver needed.
-- Netlib known optimal objective values (bundled data file) at tolerance-consistent bounds.
+- Netlib known optimal objective values (bundled data file): assert relative objective error ≤ 1e-3 when solved to KKT 1e-4 (empirically safe starting bound; tighten per-instance once measured).
 - CPU f64 reference PDHG (simple, slow, obviously correct) — the comparison target for every GPU kernel and for the full algorithm on tiny instances.
 
 ## Platform constraints (verified 2026-07-07)
