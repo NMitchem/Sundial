@@ -41,7 +41,7 @@ or-fable/
 ### sundial-core
 
 **Problem representation — two forms:**
-1. **Explicit:** CSR matrix (via `sprs`) with two-sided constraint bounds `l_c ≤ Ax ≤ u_c` and variable bounds `l_v ≤ x ≤ u_v` (PDLP standard form; what MPS RANGES/BOUNDS require).
+1. **Explicit:** CSR matrix (minimal hand-rolled `CsrMatrix`; see decisions log) with two-sided constraint bounds `l_c ≤ Ax ≤ u_c` and variable bounds `l_v ≤ x ≤ u_v` (PDLP standard form; what MPS RANGES/BOUNDS require).
 2. **Matrix-free:** the problem supplies `Ax` and `Aᵀy` as GPU kernels (a `LinOp` trait with GPU dispatch hooks) instead of a stored matrix. This is what makes the transport hero possible: its constraint operator is "row sums / column sums" and its cost matrix is computed in-shader from cell coordinates — never materialized. PDLP is matvec-based, so this is faithful to the algorithm, not a special case.
 
 **engine:** wgpu device/queue management, buffer lifecycle, PDHG iteration loop with restart policy. Identical code paths native (Metal/Vulkan/DX12) and wasm32/WebGPU. Golden rule: *state lives on the GPU*; CPU readback only for periodic diagnostics (a handful of floats) and the final solution.
