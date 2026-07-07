@@ -1,5 +1,20 @@
 use wgpu::util::DeviceExt;
 
+/// f64 → f32 with ±∞ mapped to the GPU sentinel ±1e30 (see plan's infinity convention).
+pub fn pack_f32_inf_sentinel(v: &[f64]) -> Vec<f32> {
+    v.iter()
+        .map(|&x| {
+            if x == f64::INFINITY {
+                1e30
+            } else if x == f64::NEG_INFINITY {
+                -1e30
+            } else {
+                x as f32
+            }
+        })
+        .collect()
+}
+
 pub fn storage_f32(device: &wgpu::Device, data: &[f32], label: &str) -> wgpu::Buffer {
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
