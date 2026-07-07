@@ -43,6 +43,17 @@ fn respects_iteration_limit() {
 }
 
 #[test]
+#[should_panic(expected = "check_every must be > 0")]
+fn rejects_zero_check_every() {
+    let (p, _, _, _) = testgen::generate(3, 40, 25);
+    let opts = SolveOptions {
+        check_every: 0,
+        ..Default::default()
+    };
+    let _ = reference::solve(&p, &opts, &mut |_| {});
+}
+
+#[test]
 fn progress_events_fire() {
     let (p, _, _, _) = testgen::generate(2, 40, 25);
     let opts = SolveOptions {

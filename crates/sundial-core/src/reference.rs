@@ -50,6 +50,10 @@ pub fn solve(
     opts: &SolveOptions,
     progress: &mut dyn FnMut(ProgressEvent),
 ) -> Solution {
+    assert!(
+        opts.check_every > 0,
+        "SolveOptions::check_every must be > 0"
+    );
     let start = Instant::now();
     let (sp, s) = scale::ruiz_pc(p, 10);
     let (m, n) = (sp.n_cons(), sp.n_vars());
