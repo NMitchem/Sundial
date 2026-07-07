@@ -20,7 +20,7 @@ The first WebGPU-native linear programming solver: restarted PDHG (the PDLP algo
 | Restart scheme | Strategy trait: classic PDLP adaptive restarts first, Halpern/reflected (cuPDLPx-style) second | cuPDLPx's restarted-Halpern PDHG is still the frontier (unchanged since 2025-09); pick empirically |
 | Reductions | Workgroup-shared-memory tree only | wgpu subgroups are **native-only on web** (verified 2026-07-07); portable path required |
 | Iteration timing | CPU `performance.now()` per K-iteration batch (browser); timestamp queries native-CLI-only | Browser timestamp queries are quantized/gated |
-| Host sparse repr | `sprs` 0.11.4 | Verified maintained (2025-11); no hand-rolled CSR |
+| Host sparse repr | Hand-rolled CsrMatrix (M0) | Plan's Task 2 defined a minimal CSR (mul/transpose) and nothing needed more; sprs deferred until a real need appears (final-review adjudication) |
 | wgpu version | 30.0.0, fallback 29.0.4 | 30.0.0 released 2026-07-01; decide in week 1 after a scaffold smoke test. Note v29 renamed push constants → "immediates" |
 | License | Dual MIT / Apache-2.0 | Rust ecosystem norm |
 | Repo | `git init` at `or-fable/` root | This directory is the project home |
