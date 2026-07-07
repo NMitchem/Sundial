@@ -1,0 +1,10 @@
+[package]
+name = "sundial-mps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sundial-core.workspace = true
+flate2.workspace = true
+thiserror.workspace = true
