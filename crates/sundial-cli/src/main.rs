@@ -45,6 +45,21 @@ enum Cmd {
         #[arg(long, default_value = "results.csv")]
         out: PathBuf,
     },
+    /// Solve a generated optimal-transport instance (the M1 hero)
+    Transport {
+        #[arg(long, default_value_t = 32)]
+        grid: usize,
+        #[arg(long, default_value = "blobs")]
+        preset: String,
+        #[arg(long, default_value_t = 1e-4)]
+        tol: f64,
+        #[arg(long, value_enum, default_value_t = Engine::Gpu)]
+        engine: Engine,
+        #[arg(long, default_value_t = 500_000)]
+        max_iters: u64,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Serialize)]
@@ -194,6 +209,74 @@ fn main() -> Result<()> {
             }
             std::fs::write(&out, rows.join("\n") + "\n")?;
             println!("wrote {}", out.display());
+        }
+        Cmd::Transport {
+            grid,
+            preset,
+            tol,
+            engine,
+            max_iters,
+            json,
+        } => {
+            let preset: sundial_core::transport::Preset =
+                preset.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            let p = sundial_core::transport::problem(preset, grid);
+            eprintln!(
+                "transport {grid}x{grid}: {} variables, {} constraints",
+                p.n_vars(),
+                p.n_cons()
+            );
+            let opts = SolveOptions {
+                tol,
+                max_iters,
+                ..Default::default()
+            };
+            let mut on_progress = |e: ProgressEvent| {
+                if !json {
+                    eprintln!(
+                        "iter {:>8}  primal {:.2e}  dual {:.2e}  gap {:.2e}  {:.3} ms/iter",
+                        e.iter, e.rel_primal, e.rel_dual, e.rel_gap, e.ms_per_iter
+                    );
+                }
+            };
+            let sol = match engine {
+                Engine::Cpu => sundial_core::reference::solve_op(&p, &opts, &mut on_progress),
+                Engine::Gpu => {
+                    let ctx = pollster::block_on(sundial_core::gpu::GpuContext::new())
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                    eprintln!(
+                        "GPU: {} (max binding {} MiB)",
+                        ctx.adapter_name, ctx.max_binding_mib
+                    );
+                    let gop = sundial_core::gpu::op::TransportGpuOp::new(
+                        &ctx.device,
+                        grid * grid,
+                        grid * grid,
+                    );
+                    pollster::block_on(sundial_core::gpu::engine::solve_gpu_op(
+                        &ctx,
+                        &p,
+                        &gop,
+                        &opts,
+                        &mut on_progress,
+                        None,
+                    ))
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
+                }
+            };
+            let name = format!("transport-{preset:?}-{grid}").to_lowercase();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report(&name, &sol))?);
+            } else {
+                println!(
+                    "{name}: {:?}  obj {:.10}  ({} iters, {} restarts, {:.0} ms, verified mu {:.2e})",
+                    sol.status, sol.primal_obj, sol.stats.iterations, sol.stats.restarts,
+                    sol.stats.solve_ms, sol.stats.verified.mu()
+                );
+            }
+            if sol.status != sundial_core::problem::SolveStatus::Optimal {
+                bail!("not solved to tolerance");
+            }
         }
     }
     Ok(())

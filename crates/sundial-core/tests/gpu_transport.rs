@@ -115,9 +115,16 @@ fn gpu_transport_1m_variables_to_1e4() {
     .unwrap();
     eprintln!(
         "1M transport: {:?}, {} iters, {} restarts, {:.0} ms, verified mu {:.2e}",
-        sol.status, sol.stats.iterations, sol.stats.restarts, sol.stats.solve_ms,
+        sol.status,
+        sol.stats.iterations,
+        sol.stats.restarts,
+        sol.stats.solve_ms,
         sol.stats.verified.mu()
     );
     assert_eq!(sol.status, SolveStatus::Optimal);
-    assert!(sol.stats.verified.mu() <= 1e-4, "mu={}", sol.stats.verified.mu());
+    assert!(
+        sol.stats.verified.mu() <= 1e-4,
+        "mu={}",
+        sol.stats.verified.mu()
+    );
 }
