@@ -90,3 +90,34 @@ fn gpu_solves_small_transport() {
         cpu.primal_obj
     );
 }
+
+#[test]
+#[ignore = "requires GPU"]
+fn gpu_transport_1m_variables_to_1e4() {
+    let ctx = pollster::block_on(GpuContext::new()).expect("no GPU");
+    let g = 32usize;
+    let p = transport::problem(Preset::Blobs, g);
+    assert_eq!(p.n_vars(), 1_048_576, "hero must be ≥1M variables");
+    let gop = TransportGpuOp::new(&ctx.device, g * g, g * g);
+    let opts = SolveOptions {
+        tol: 1e-4,
+        max_iters: 500_000,
+        ..Default::default()
+    };
+    let sol = pollster::block_on(sundial_core::gpu::engine::solve_gpu_op(
+        &ctx,
+        &p,
+        &gop,
+        &opts,
+        &mut |_| {},
+        None,
+    ))
+    .unwrap();
+    eprintln!(
+        "1M transport: {:?}, {} iters, {} restarts, {:.0} ms, verified mu {:.2e}",
+        sol.status, sol.stats.iterations, sol.stats.restarts, sol.stats.solve_ms,
+        sol.stats.verified.mu()
+    );
+    assert_eq!(sol.status, SolveStatus::Optimal);
+    assert!(sol.stats.verified.mu() <= 1e-4, "mu={}", sol.stats.verified.mu());
+}

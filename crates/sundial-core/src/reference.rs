@@ -76,8 +76,10 @@ pub fn solve_view(
     let start = Instant::now();
     let (m, n) = (iterate.op.n_rows(), iterate.op.n_cols());
 
-    let tau = 0.9 / norm_a;
-    let sigma = 0.9 / norm_a;
+    let (q_it, c_it) = kkt::denominators_view(iterate);
+    let mut omega = crate::weight::initial_primal_weight(q_it, c_it);
+    let mut tau = 0.9 / (norm_a * omega);
+    let mut sigma = 0.9 * omega / norm_a;
 
     let mut st = State {
         x: vec![0.0; n],
@@ -180,6 +182,10 @@ pub fn solve_view(
             // restart rule
             if mu_cand <= 0.5 * mu_last_restart || iters_since_restart >= 4096 {
                 st.restart_from(cand_is_avg);
+                let r_cand = if cand_is_avg { &r_avg } else { &r_cur };
+                omega = crate::weight::update_primal_weight(omega, r_cand.rel_primal, r_cand.rel_dual);
+                tau = 0.9 / (norm_a * omega);
+                sigma = 0.9 * omega / norm_a;
                 mu_last_restart = mu_cand;
                 iters_since_restart = 0;
                 restarts += 1;
