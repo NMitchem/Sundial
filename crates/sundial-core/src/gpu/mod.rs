@@ -1,8 +1,18 @@
 pub mod buffers;
 pub mod engine; // added in Task 8; create as empty file now
 pub mod kernels; // added in Task 7; create as empty file now
+pub mod op;
 
 use thiserror::Error;
+
+pub(crate) const WG: u32 = 256;
+/// Dispatch cap: kernels grid-stride, so we never exceed WebGPU's
+/// guaranteed 65,535 workgroups per dimension (16.7M elems / 256 = 65,536
+/// would). 4096 workgroups = 1M threads — plenty of occupancy.
+pub(crate) const MAX_WG: u32 = 4096;
+pub(crate) fn wgs(len: usize) -> u32 {
+    (len as u32).div_ceil(WG).clamp(1, MAX_WG)
+}
 
 #[derive(Debug, Error)]
 pub enum GpuError {

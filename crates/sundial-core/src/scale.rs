@@ -10,6 +10,15 @@ pub struct Scaling {
 }
 
 impl Scaling {
+    /// No-op scaling for matrix-free problems (adjudication: they solve
+    /// unscaled — the transport incidence structure is already balanced).
+    pub fn identity(m: usize, n: usize) -> Self {
+        Self {
+            row: vec![1.0; m],
+            col: vec![1.0; n],
+        }
+    }
+
     pub fn unscale_x(&self, x_scaled: &[f64]) -> Vec<f64> {
         x_scaled.iter().zip(&self.col).map(|(x, d)| x * d).collect()
     }

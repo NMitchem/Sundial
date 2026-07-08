@@ -206,6 +206,15 @@ pub struct ProgressEvent {
     pub ms_per_iter: f64,
 }
 
+/// Display-grade snapshot delivered to the hero UI at every residual check:
+/// ORIGINAL-space A·x at the current iterate (f32 from the GPU residual
+/// pipeline — NOT certificate-grade). For transport, ax[0..ns] = achieved
+/// row sums, ax[ns..] = achieved column sums.
+pub struct SnapshotEvent<'a> {
+    pub iter: u64,
+    pub ax: &'a [f32],
+}
+
 impl crate::linop::LinOp for LpProblem {
     fn n_rows(&self) -> usize {
         self.a.n_rows

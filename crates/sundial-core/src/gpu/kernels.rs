@@ -98,7 +98,7 @@ pub fn bind(
     })
 }
 
-fn pass_dispatch(
+pub(crate) fn pass_dispatch(
     enc: &mut wgpu::CommandEncoder,
     pl: &wgpu::ComputePipeline,
     bg: &wgpu::BindGroup,

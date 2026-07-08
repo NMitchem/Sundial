@@ -43,7 +43,7 @@ fn spmv_matches_cpu() {
     let b_out = buffers::storage_zeros_f32(&c.device, p.a.n_rows, "out");
     let params = kernels::ParamsData {
         n: p.a.n_rows as u32,
-        stride: 0,
+        stride: (p.a.n_rows as u32).div_ceil(256) * 256,
         tau: 0.0,
         sigma: 0.0,
         w: 0.0,
@@ -107,7 +107,7 @@ fn primal_step_matches_cpu_with_sentinel_bounds() {
     let bxt = buffers::storage_zeros_f32(&c.device, n, "x_tilde");
     let params = kernels::ParamsData {
         n: n as u32,
-        stride: 0,
+        stride: (n as u32).div_ceil(256) * 256,
         tau,
         sigma: 0.0,
         w: 0.0,
@@ -172,7 +172,7 @@ fn residual_terms_project_open_bounds_to_zero() {
     let inf = 1e30f32;
     let params = || kernels::ParamsData {
         n: 4,
-        stride: 0,
+        stride: 256,
         tau: 0.0,
         sigma: 0.0,
         w: 0.0,
@@ -291,4 +291,46 @@ fn batched_reductions_match_individual() {
     assert_eq!(vals[0], dot, "dot mismatch");
     assert_eq!(vals[1], sum, "sum mismatch");
     assert_eq!(vals[2], mx, "maxabs mismatch");
+}
+
+#[test]
+#[ignore = "requires GPU"]
+fn grid_stride_covers_beyond_dispatch_cap() {
+    use sundial_core::gpu::kernels::{bind, Kernels, ParamsData};
+    use sundial_core::gpu::{buffers, GpuContext};
+    let ctx = pollster::block_on(GpuContext::new()).expect("no GPU");
+    let k = Kernels::new(&ctx.device);
+    // 1_100_000 > MAX_WG·256 = 1_048_576: threads past the cap only get
+    // written if the kernel grid-strides.
+    let n = 1_100_000usize;
+    let src = buffers::storage_f32(&ctx.device, &vec![1.0f32; n], "src");
+    let dst = buffers::storage_zeros_f32(&ctx.device, n, "dst");
+    let wgs = 4096u32;
+    let u = buffers::uniform_bytes(
+        &ctx.device,
+        &ParamsData {
+            n: n as u32,
+            stride: wgs * 256,
+            tau: 0.0,
+            sigma: 0.0,
+            w: 2.0,
+        }
+        .bytes(),
+        "u",
+    );
+    let pl = k.pipeline("ew_scale");
+    let bg = bind(&ctx.device, pl, &[(0, &u), (1, &src), (6, &dst)]);
+    let mut enc = ctx.device.create_command_encoder(&Default::default());
+    {
+        let mut pass = enc.begin_compute_pass(&Default::default());
+        pass.set_pipeline(pl);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.dispatch_workgroups(wgs, 1, 1);
+    }
+    ctx.queue.submit([enc.finish()]);
+    let out = pollster::block_on(buffers::readback_f32(&ctx.device, &ctx.queue, &dst, n));
+    assert!(
+        out.iter().all(|&v| v == 2.0),
+        "tail beyond 1_048_576 not covered"
+    );
 }

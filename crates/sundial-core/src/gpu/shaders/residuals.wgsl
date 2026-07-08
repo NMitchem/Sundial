@@ -15,10 +15,12 @@ const INF_THRESH: f32 = 0.5e30;
 // rp = ax − clamp(ax, lc, uc)   in_a=ax_orig  in_b=lc  in_c=uc  out_a=rp
 @compute @workgroup_size(256)
 fn primal_res(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= P.n) { return; }
-    let v = in_a[i];
-    out_a[i] = v - clamp(v, in_b[i], in_c[i]);
+    var i = gid.x;
+    while (i < P.n) {
+        let v = in_a[i];
+        out_a[i] = v - clamp(v, in_b[i], in_c[i]);
+        i = i + P.stride;
+    }
 }
 
 // g = c + aty; rd per absorption rule; bterm for dual objective.
@@ -31,19 +33,21 @@ fn primal_res(@builtin(global_invocation_id) gid: vec3<u32>) {
 // in_a=aty_orig  in_b=c  in_c=lv  in_d=uv  out_a=rd  out_b=bterm
 @compute @workgroup_size(256)
 fn dual_res_terms(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let j = gid.x;
-    if (j >= P.n) { return; }
-    let g = in_b[j] + in_a[j];
-    let l_fin = in_c[j] > -INF_THRESH;
-    let u_fin = in_d[j] < INF_THRESH;
-    var rd = g;
-    if (g > 0.0 && l_fin) { rd = 0.0; }
-    if (g < 0.0 && u_fin) { rd = 0.0; }
-    out_a[j] = rd;
-    var bt = 0.0;
-    if (g > 0.0 && l_fin) { bt = g * in_c[j]; }
-    if (g < 0.0 && u_fin) { bt = g * in_d[j]; }
-    out_b[j] = bt;
+    var j = gid.x;
+    while (j < P.n) {
+        let g = in_b[j] + in_a[j];
+        let l_fin = in_c[j] > -INF_THRESH;
+        let u_fin = in_d[j] < INF_THRESH;
+        var rd = g;
+        if (g > 0.0 && l_fin) { rd = 0.0; }
+        if (g < 0.0 && u_fin) { rd = 0.0; }
+        out_a[j] = rd;
+        var bt = 0.0;
+        if (g > 0.0 && l_fin) { bt = g * in_c[j]; }
+        if (g < 0.0 && u_fin) { bt = g * in_d[j]; }
+        out_b[j] = bt;
+        j = j + P.stride;
+    }
 }
 
 // rterm[i] = y>0 ? uc·y : y<0 ? lc·y : 0, with the same projected-gap rule:
@@ -51,13 +55,15 @@ fn dual_res_terms(@builtin(global_invocation_id) gid: vec3<u32>) {
 // in_a=y_orig  in_b=lc  in_c=uc  out_a=rterm
 @compute @workgroup_size(256)
 fn row_terms(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= P.n) { return; }
-    let y = in_a[i];
-    let l_fin = in_b[i] > -INF_THRESH;
-    let u_fin = in_c[i] < INF_THRESH;
-    var t = 0.0;
-    if (y > 0.0 && u_fin) { t = in_c[i] * y; }
-    if (y < 0.0 && l_fin) { t = in_b[i] * y; }
-    out_a[i] = t;
+    var i = gid.x;
+    while (i < P.n) {
+        let y = in_a[i];
+        let l_fin = in_b[i] > -INF_THRESH;
+        let u_fin = in_c[i] < INF_THRESH;
+        var t = 0.0;
+        if (y > 0.0 && u_fin) { t = in_c[i] * y; }
+        if (y < 0.0 && l_fin) { t = in_b[i] * y; }
+        out_a[i] = t;
+        i = i + P.stride;
+    }
 }

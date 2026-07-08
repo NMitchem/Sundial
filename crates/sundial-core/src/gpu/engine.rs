@@ -1,14 +1,10 @@
 use super::buffers::{self, pack_f32_inf_sentinel};
 use super::kernels::{self, Kernels, ParamsData, Reducer};
-use super::{GpuContext, GpuError};
+use super::op;
+use super::{wgs, GpuContext, GpuError, WG};
 use crate::problem::*;
 use crate::{kkt, reference, scale};
 use web_time::Instant;
-
-const WG: u32 = 256;
-fn wgs(len: usize) -> u32 {
-    (len as u32).div_ceil(WG).max(1)
-}
 
 struct EvalOut {
     rel_p: f64,
@@ -17,6 +13,9 @@ struct EvalOut {
     mu: f64,
 }
 
+/// Explicit-path entry: Ruiz/PC-scaled CSR solved on the GPU, certificate
+/// verified in ORIGINAL space. Signature is UNCHANGED (wasm.rs + the CLI
+/// call this).
 pub async fn solve_gpu(
     ctx: &GpuContext,
     p: &LpProblem,
@@ -27,12 +26,11 @@ pub async fn solve_gpu(
         opts.check_every > 0,
         "SolveOptions::check_every must be > 0"
     );
-    let start = Instant::now();
     let (sp, s) = scale::ruiz_pc(p, 10);
-    let (m, n) = (sp.n_cons(), sp.n_vars());
 
     // buffer-size guard: largest single binding is the CSR values/indices array
-    let needed_mib = ((sp.a.nnz() * 4).max((n.max(m)) * 4) as u64).div_ceil(1024 * 1024);
+    let needed_mib =
+        ((sp.a.nnz() * 4).max((sp.n_vars().max(sp.n_cons())) * 4) as u64).div_ceil(1024 * 1024);
     if needed_mib > ctx.max_binding_mib {
         return Err(GpuError::BufferTooLarge {
             needed_mib,
@@ -41,32 +39,86 @@ pub async fn solve_gpu(
     }
 
     let norm_a = reference::power_iteration_norm(&sp.a, &sp.at, 100, opts.seed);
+    let gop = op::CsrGpuOp::new(&ctx.device, &sp.a, &sp.at);
+    solve_core(
+        ctx,
+        &sp.view(),
+        &p.view(),
+        &s,
+        norm_a,
+        &gop,
+        opts,
+        progress,
+        None,
+    )
+    .await
+}
+
+/// Operator (matrix-free) entry: the constraint matrix is recorded by
+/// `gpu_op`, never materialized. Matrix-free problems solve UNSCALED with the
+/// operator's exact norm; certificate space == iterate space.
+pub async fn solve_gpu_op<O: crate::linop::LinOp>(
+    ctx: &GpuContext,
+    p: &OpProblem<O>,
+    gpu_op: &dyn op::GpuOp,
+    opts: &SolveOptions,
+    progress: &mut dyn FnMut(ProgressEvent),
+    snapshot: Option<&mut dyn FnMut(SnapshotEvent<'_>)>,
+) -> Result<Solution, GpuError> {
+    assert!(
+        opts.check_every > 0,
+        "SolveOptions::check_every must be > 0"
+    );
+    assert_eq!(gpu_op.n_rows(), p.n_cons(), "GpuOp/OpProblem row mismatch");
+    assert_eq!(gpu_op.n_cols(), p.n_vars(), "GpuOp/OpProblem col mismatch");
+    let needed_mib = (((p.n_vars().max(p.n_cons())) * 4).div_ceil(1024 * 1024)) as u64;
+    if needed_mib > ctx.max_binding_mib {
+        return Err(GpuError::BufferTooLarge {
+            needed_mib,
+            allowed_mib: ctx.max_binding_mib,
+        });
+    }
+    // Matrix-free = UNSCALED with the operator's exact norm (adjudication).
+    let norm_a = crate::linop::op_norm2(&p.op, opts.seed);
+    let s = scale::Scaling::identity(p.n_cons(), p.n_vars());
+    let v = p.view();
+    solve_core(ctx, &v, &v, &s, norm_a, gpu_op, opts, progress, snapshot).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn solve_core(
+    ctx: &GpuContext,
+    it: &LpView<'_>,   // iterate space (scaled explicit / original op)
+    orig: &LpView<'_>, // certificate space — CPU f64 checks happen here
+    s: &scale::Scaling,
+    norm_a: f64,
+    gpu_op: &dyn op::GpuOp,
+    opts: &SolveOptions,
+    progress: &mut dyn FnMut(ProgressEvent),
+    mut snapshot: Option<&mut dyn FnMut(SnapshotEvent<'_>)>,
+) -> Result<Solution, GpuError> {
+    let start = Instant::now();
+    let (m, n) = (gpu_op.n_rows(), gpu_op.n_cols());
     let (tau, sigma) = ((0.9 / norm_a) as f32, (0.9 / norm_a) as f32);
-    let (q_norm, c_norm) = kkt::denominators(p); // ORIGINAL-space denominators, f64
+    let (q_norm, c_norm) = kkt::denominators_view(orig); // ORIGINAL-space denominators, f64
     let dev = &ctx.device;
     let k = Kernels::new(dev);
     let red = Reducer::new(dev, n.max(m));
-    let results = buffers::storage_zeros_f32(dev, 16, "results");
+    // results[0]=maxabs, [1..=5]=cur eval, [6..=10]=avg eval, [11..16] spare,
+    // [16..16+m]=ORIGINAL-space A·x_cur snapshot (written only when requested).
+    let results = buffers::storage_zeros_f32(dev, 16 + m, "results");
+    let has_snapshot = snapshot.is_some();
 
-    // ---- pack + upload ----
+    // ---- pack + upload (the six CSR buffers now live in `gpu_op`). ----
     let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|&x| x as f32).collect() };
     let b_f = |d: &[f32], l: &str| buffers::storage_f32(dev, d, l);
-    let b_u = |d: &[u32], l: &str| buffers::storage_u32(dev, d, l);
 
-    // scaled CSR A and Aᵀ
-    let a_indptr = b_u(&sp.a.indptr, "a_indptr");
-    let a_indices = b_u(&sp.a.indices, "a_indices");
-    let a_vals = b_f(&f32v(&sp.a.values), "a_vals");
-    let at_indptr = b_u(&sp.at.indptr, "at_indptr");
-    let at_indices = b_u(&sp.at.indices, "at_indices");
-    let at_vals = b_f(&f32v(&sp.at.values), "at_vals");
-
-    // scaled iterate-space data (sentinel-packed bounds)
-    let c_s = b_f(&f32v(&sp.c), "c_s");
-    let lv_s = b_f(&pack_f32_inf_sentinel(&sp.col_lower), "lv_s");
-    let uv_s = b_f(&pack_f32_inf_sentinel(&sp.col_upper), "uv_s");
-    let lc_s = b_f(&pack_f32_inf_sentinel(&sp.row_lower), "lc_s");
-    let uc_s = b_f(&pack_f32_inf_sentinel(&sp.row_upper), "uc_s");
+    // iterate-space data (sentinel-packed bounds)
+    let c_s = b_f(&f32v(it.c), "c_s");
+    let lv_s = b_f(&pack_f32_inf_sentinel(it.col_lower), "lv_s");
+    let uv_s = b_f(&pack_f32_inf_sentinel(it.col_upper), "uv_s");
+    let lc_s = b_f(&pack_f32_inf_sentinel(it.row_lower), "lc_s");
+    let uc_s = b_f(&pack_f32_inf_sentinel(it.row_upper), "uc_s");
 
     // ORIGINAL-space data for residual evaluation. Bounds use the SAME 1e30
     // sentinel as the iterate bounds (no true ±∞ in GPU buffers — WGSL may assume
@@ -76,11 +128,11 @@ pub async fn solve_gpu(
     // sign-cone projection of the dual — identical semantics to the host
     // `project_dual` f64 gate, so the GPU trigger and the CPU verdict agree and
     // `rel_gap` stays finite for progress events.
-    let c_o = b_f(&f32v(&p.c), "c_o");
-    let lv_o = b_f(&pack_f32_inf_sentinel(&p.col_lower), "lv_o");
-    let uv_o = b_f(&pack_f32_inf_sentinel(&p.col_upper), "uv_o");
-    let lc_o = b_f(&pack_f32_inf_sentinel(&p.row_lower), "lc_o");
-    let uc_o = b_f(&pack_f32_inf_sentinel(&p.row_upper), "uc_o");
+    let c_o = b_f(&f32v(orig.c), "c_o");
+    let lv_o = b_f(&pack_f32_inf_sentinel(orig.col_lower), "lv_o");
+    let uv_o = b_f(&pack_f32_inf_sentinel(orig.col_upper), "uv_o");
+    let lc_o = b_f(&pack_f32_inf_sentinel(orig.row_lower), "lc_o");
+    let uc_o = b_f(&pack_f32_inf_sentinel(orig.row_upper), "uc_o");
     let dr = b_f(&f32v(&s.row), "dr");
     let dr_inv = b_f(
         &f32v(&s.row.iter().map(|v| 1.0 / v).collect::<Vec<_>>()),
@@ -92,10 +144,10 @@ pub async fn solve_gpu(
     );
 
     // iterates (x0 = clamp(0, bounds), y0 = 0), sums = copies of the start point
-    let x0: Vec<f32> = sp
+    let x0: Vec<f32> = it
         .col_lower
         .iter()
-        .zip(&sp.col_upper)
+        .zip(it.col_upper)
         .map(|(&l, &u)| (0.0f64.clamp(l, u)) as f32)
         .collect();
     let x = b_f(&x0, "x");
@@ -140,28 +192,13 @@ pub async fn solve_gpu(
     let u_m = u(m, 0.0, "u_m");
 
     // ---- iteration bind groups, per parity ----
+    // Only the four vector kernels (primal_step, dual_step, accum×2) are
+    // prebuilt; the op records the two spmv steps per iteration.
     // parity 0 reads (x, y) writes (x_new, y_new); parity 1 the reverse.
     let make_iter =
         |x_src: &wgpu::Buffer, y_src: &wgpu::Buffer, x_dst: &wgpu::Buffer, y_dst: &wgpu::Buffer| {
             [
-                // 1. aty = Aᵀ y_src            (spmv over n rows of Aᵀ)
-                (
-                    k.pipeline("spmv"),
-                    kernels::bind(
-                        dev,
-                        k.pipeline("spmv"),
-                        &[
-                            (0, &u_n),
-                            (8, &at_indptr),
-                            (9, &at_indices),
-                            (1, &at_vals),
-                            (2, y_src),
-                            (6, &aty),
-                        ],
-                    ),
-                    wgs(n),
-                ),
-                // 2. x_dst, x_tilde = primal_step(x_src, aty)
+                // 1. x_dst, x_tilde = primal_step(x_src, aty)
                 (
                     k.pipeline("primal_step"),
                     kernels::bind(
@@ -180,24 +217,7 @@ pub async fn solve_gpu(
                     ),
                     wgs(n),
                 ),
-                // 3. axt = A x_tilde
-                (
-                    k.pipeline("spmv"),
-                    kernels::bind(
-                        dev,
-                        k.pipeline("spmv"),
-                        &[
-                            (0, &u_m),
-                            (8, &a_indptr),
-                            (9, &a_indices),
-                            (1, &a_vals),
-                            (2, &x_tilde),
-                            (6, &axt),
-                        ],
-                    ),
-                    wgs(m),
-                ),
-                // 4. y_dst = dual_step(y_src, axt)
+                // 2. y_dst = dual_step(y_src, axt)
                 (
                     k.pipeline("dual_step"),
                     kernels::bind(
@@ -214,7 +234,7 @@ pub async fn solve_gpu(
                     ),
                     wgs(m),
                 ),
-                // 5. sum_x += x_dst ; 6. sum_y += y_dst
+                // 3. sum_x += x_dst
                 (
                     k.pipeline("accum"),
                     kernels::bind(
@@ -224,6 +244,7 @@ pub async fn solve_gpu(
                     ),
                     wgs(n),
                 ),
+                // 4. sum_y += y_dst
                 (
                     k.pipeline("accum"),
                     kernels::bind(
@@ -239,14 +260,10 @@ pub async fn solve_gpu(
         make_iter(&x, &y, &x_new, &y_new),
         make_iter(&x_new, &y_new, &x, &y),
     ];
+    // Per-parity iterate handles for the op's spmv sources: (y_src, x̃).
+    let parity_src: [(&wgpu::Buffer, &wgpu::Buffer); 2] = [(&y, &x_tilde), (&y_new, &x_tilde)];
 
     let bufs = EvalBufs {
-        a_indptr: &a_indptr,
-        a_indices: &a_indices,
-        a_vals: &a_vals,
-        at_indptr: &at_indptr,
-        at_indices: &at_indices,
-        at_vals: &at_vals,
         c_s: &c_s,
         c_o: &c_o,
         lv_o: &lv_o,
@@ -283,12 +300,14 @@ pub async fn solve_gpu(
         // one submit = check_every iterations
         let mut enc = dev.create_command_encoder(&Default::default());
         for _ in 0..opts.check_every {
-            for (pl, bg, w) in &iter_bg[parity] {
-                let mut pass = enc.begin_compute_pass(&Default::default());
-                pass.set_pipeline(pl);
-                pass.set_bind_group(0, bg, &[]);
-                pass.dispatch_workgroups(*w, 1, 1);
-            }
+            let (y_src, xt) = parity_src[parity];
+            let steps = &iter_bg[parity]; // [primal_step, dual_step, accum_x, accum_y]
+            gpu_op.record_apply_t(dev, &k, &mut enc, y_src, &aty); // aty = Aᵀ y_src
+            dispatch_prebuilt(&mut enc, &steps[0]); // primal_step → x_dst, x̃
+            gpu_op.record_apply(dev, &k, &mut enc, xt, &axt); // axt = A x̃
+            dispatch_prebuilt(&mut enc, &steps[1]); // dual_step → y_dst
+            dispatch_prebuilt(&mut enc, &steps[2]); // sum_x += x_dst
+            dispatch_prebuilt(&mut enc, &steps[3]); // sum_y += y_dst
             parity ^= 1;
             iter += 1;
             count += 1;
@@ -331,21 +350,24 @@ pub async fn solve_gpu(
             for (ub, src, dst, len) in [(&u_avg_n, &sum_x, &xa, n), (&u_avg_m, &sum_y, &ya, m)] {
                 let pl = k.pipeline("ew_scale");
                 let bg = kernels::bind(dev, pl, &[(0, ub), (1, src), (6, dst)]);
-                let mut pass = enc.begin_compute_pass(&Default::default());
-                pass.set_pipeline(pl);
-                pass.set_bind_group(0, &bg, &[]);
-                pass.dispatch_workgroups(wgs(len), 1, 1);
+                kernels::pass_dispatch(&mut enc, pl, &bg, wgs(len));
             }
         }
         red.record_maxabs(dev, &mut enc, &k, x_cur, n, &results, 0);
         record_eval(
-            dev, &mut enc, &k, &red, &u_n, &u_m, &bufs, x_cur, y_cur, n, m, &results, 1,
+            dev, &mut enc, &k, &red, gpu_op, &u_n, &u_m, &bufs, x_cur, y_cur, n, m, &results, 1,
         );
+        if has_snapshot {
+            // ax_o now holds ORIGINAL-space A·x_cur from the CURRENT eval; copy
+            // it out BEFORE the average's record_eval below overwrites ax_o.
+            enc.copy_buffer_to_buffer(&ax_o, 0, &results, 16 * 4, (m * 4) as u64);
+        }
         record_eval(
-            dev, &mut enc, &k, &red, &u_n, &u_m, &bufs, &xa, &ya, n, m, &results, 6,
+            dev, &mut enc, &k, &red, gpu_op, &u_n, &u_m, &bufs, &xa, &ya, n, m, &results, 6,
         );
         ctx.queue.submit([enc.finish()]);
-        let vals = buffers::readback_f32(dev, &ctx.queue, &results, 11).await;
+        let want = if has_snapshot { 16 + m } else { 11 };
+        let vals = buffers::readback_f32(dev, &ctx.queue, &results, want).await;
 
         // NaN/overflow watchdog (evaluations for a broken iterate are unused)
         let mx = vals[0];
@@ -353,8 +375,8 @@ pub async fn solve_gpu(
             status = SolveStatus::NumericalBreakdown;
             break 'outer;
         }
-        let e_cur = eval_from(&vals, 1, p.obj_offset, q_norm, c_norm);
-        let e_avg = eval_from(&vals, 6, p.obj_offset, q_norm, c_norm);
+        let e_cur = eval_from(&vals, 1, orig.obj_offset, q_norm, c_norm);
+        let e_avg = eval_from(&vals, 6, orig.obj_offset, q_norm, c_norm);
         let (e_cand, cand_x, cand_y, cand_is_avg) = if e_avg.mu < e_cur.mu {
             (&e_avg, &xa, &ya, true)
         } else {
@@ -374,7 +396,14 @@ pub async fn solve_gpu(
             ms_per_iter,
         });
 
-        // termination trigger → authoritative CPU f64 verification
+        if let Some(cb) = snapshot.as_deref_mut() {
+            cb(SnapshotEvent {
+                iter,
+                ax: &vals[16..16 + m],
+            });
+        }
+
+        // termination trigger → authoritative CPU f64 verification (ORIGINAL space)
         if e_cand.mu <= trigger_tol {
             let xs = buffers::readback_f32(dev, &ctx.queue, cand_x, n).await;
             let ys = buffers::readback_f32(dev, &ctx.queue, cand_y, m).await;
@@ -382,8 +411,8 @@ pub async fn solve_gpu(
             let ys64: Vec<f64> = ys.iter().map(|&v| v as f64).collect();
             let xo = s.unscale_x(&xs64);
             let mut yo = s.unscale_y(&ys64);
-            project_dual(p, &mut yo);
-            let verified = kkt::residuals(p, &xo, &yo);
+            project_dual(orig.row_lower, orig.row_upper, &mut yo);
+            let verified = kkt::residuals_view(orig, &xo, &yo);
             if verified.mu() <= opts.tol {
                 return Ok(finish(
                     xo,
@@ -436,18 +465,24 @@ pub async fn solve_gpu(
     let ys64: Vec<f64> = ys.iter().map(|&v| v as f64).collect();
     let xo = s.unscale_x(&xs64);
     let mut yo = s.unscale_y(&ys64);
-    project_dual(p, &mut yo);
-    let verified = kkt::residuals(p, &xo, &yo);
+    project_dual(orig.row_lower, orig.row_upper, &mut yo);
+    let verified = kkt::residuals_view(orig, &xo, &yo);
     Ok(finish(xo, yo, verified, status, iter, restarts, start))
 }
 
+/// Dispatch a prebuilt (pipeline, bind-group, workgroups) step into `enc`.
+fn dispatch_prebuilt(
+    enc: &mut wgpu::CommandEncoder,
+    step: &(&wgpu::ComputePipeline, wgpu::BindGroup, u32),
+) {
+    let (pl, bg, w) = step;
+    let mut pass = enc.begin_compute_pass(&Default::default());
+    pass.set_pipeline(pl);
+    pass.set_bind_group(0, bg, &[]);
+    pass.dispatch_workgroups(*w, 1, 1);
+}
+
 struct EvalBufs<'a> {
-    a_indptr: &'a wgpu::Buffer,
-    a_indices: &'a wgpu::Buffer,
-    a_vals: &'a wgpu::Buffer,
-    at_indptr: &'a wgpu::Buffer,
-    at_indices: &'a wgpu::Buffer,
-    at_vals: &'a wgpu::Buffer,
     c_s: &'a wgpu::Buffer,
     c_o: &'a wgpu::Buffer,
     lv_o: &'a wgpu::Buffer,
@@ -468,15 +503,17 @@ struct EvalBufs<'a> {
     y_o: &'a wgpu::Buffer,
 }
 
-/// Record the 8 residual kernels + 5 reduction chains for candidate
-/// (x_buf, y_buf) into `enc`. Scalars land in results[base..base+5]:
-/// [‖r_p‖², ‖r_d‖², Σ bterm, Σ rterm, c̄ᵀx̄].
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// Record the residual kernels + 5 reduction chains for candidate
+/// (x_buf, y_buf) into `enc`. The two SpMVs are recorded by `gpu_op`; the
+/// remaining six vector kernels stay engine-owned. Scalars land in
+/// results[base..base+5]: [‖r_p‖², ‖r_d‖², Σ bterm, Σ rterm, c̄ᵀx̄].
+#[allow(clippy::too_many_arguments)]
 fn record_eval(
     dev: &wgpu::Device,
     enc: &mut wgpu::CommandEncoder,
     k: &Kernels,
     red: &Reducer,
+    gpu_op: &dyn op::GpuOp,
     u_n: &wgpu::Buffer,
     u_m: &wgpu::Buffer,
     bufs: &EvalBufs<'_>,
@@ -487,90 +524,74 @@ fn record_eval(
     results: &wgpu::Buffer,
     base: u32,
 ) {
-    let steps: [(&str, Vec<(u32, &wgpu::Buffer)>, u32); 8] = [
-        (
-            "spmv",
-            vec![
-                (0, u_m),
-                (8, bufs.a_indptr),
-                (9, bufs.a_indices),
-                (1, bufs.a_vals),
-                (2, x_buf),
-                (6, bufs.ax_s),
-            ],
-            wgs(m),
-        ),
-        (
-            "ew_mul",
-            vec![(0, u_m), (1, bufs.ax_s), (2, bufs.dr_inv), (6, bufs.ax_o)],
-            wgs(m),
-        ),
-        (
-            "primal_res",
-            vec![
-                (0, u_m),
-                (1, bufs.ax_o),
-                (2, bufs.lc_o),
-                (3, bufs.uc_o),
-                (6, bufs.rp),
-            ],
-            wgs(m),
-        ),
-        (
-            "spmv",
-            vec![
-                (0, u_n),
-                (8, bufs.at_indptr),
-                (9, bufs.at_indices),
-                (1, bufs.at_vals),
-                (2, y_buf),
-                (6, bufs.aty_s),
-            ],
-            wgs(n),
-        ),
-        (
-            "ew_mul",
-            vec![(0, u_n), (1, bufs.aty_s), (2, bufs.dc_inv), (6, bufs.aty_o)],
-            wgs(n),
-        ),
-        (
-            "dual_res_terms",
-            vec![
-                (0, u_n),
-                (1, bufs.aty_o),
-                (2, bufs.c_o),
-                (3, bufs.lv_o),
-                (4, bufs.uv_o),
-                (6, bufs.rd),
-                (7, bufs.bterm),
-            ],
-            wgs(n),
-        ),
-        (
-            "ew_mul",
-            vec![(0, u_m), (1, y_buf), (2, bufs.dr), (6, bufs.y_o)],
-            wgs(m),
-        ),
-        (
-            "row_terms",
-            vec![
-                (0, u_m),
-                (1, bufs.y_o),
-                (2, bufs.lc_o),
-                (3, bufs.uc_o),
-                (6, bufs.rterm),
-            ],
-            wgs(m),
-        ),
-    ];
-    for (name, entries, w) in steps {
-        let pl = k.pipeline(name);
-        let bg = kernels::bind(dev, pl, &entries);
-        let mut pass = enc.begin_compute_pass(&Default::default());
-        pass.set_pipeline(pl);
-        pass.set_bind_group(0, &bg, &[]);
-        pass.dispatch_workgroups(w, 1, 1);
-    }
+    let disp =
+        |enc: &mut wgpu::CommandEncoder, name: &str, entries: &[(u32, &wgpu::Buffer)], w: u32| {
+            let pl = k.pipeline(name);
+            let bg = kernels::bind(dev, pl, entries);
+            kernels::pass_dispatch(enc, pl, &bg, w);
+        };
+    // primal residual chain: ax_s = A·x ; ax_o = ax_s ⊙ dr_inv ; rp = ax_o − clamp
+    gpu_op.record_apply(dev, k, enc, x_buf, bufs.ax_s);
+    disp(
+        enc,
+        "ew_mul",
+        &[(0, u_m), (1, bufs.ax_s), (2, bufs.dr_inv), (6, bufs.ax_o)],
+        wgs(m),
+    );
+    disp(
+        enc,
+        "primal_res",
+        &[
+            (0, u_m),
+            (1, bufs.ax_o),
+            (2, bufs.lc_o),
+            (3, bufs.uc_o),
+            (6, bufs.rp),
+        ],
+        wgs(m),
+    );
+    // dual residual chain: aty_s = Aᵀ·y ; aty_o = aty_s ⊙ dc_inv ; rd, bterm
+    gpu_op.record_apply_t(dev, k, enc, y_buf, bufs.aty_s);
+    disp(
+        enc,
+        "ew_mul",
+        &[(0, u_n), (1, bufs.aty_s), (2, bufs.dc_inv), (6, bufs.aty_o)],
+        wgs(n),
+    );
+    disp(
+        enc,
+        "dual_res_terms",
+        &[
+            (0, u_n),
+            (1, bufs.aty_o),
+            (2, bufs.c_o),
+            (3, bufs.lv_o),
+            (4, bufs.uv_o),
+            (6, bufs.rd),
+            (7, bufs.bterm),
+        ],
+        wgs(n),
+    );
+    // row (dual-objective) terms: y_o = y ⊙ dr ; rterm
+    disp(
+        enc,
+        "ew_mul",
+        &[(0, u_m), (1, y_buf), (2, bufs.dr), (6, bufs.y_o)],
+        wgs(m),
+    );
+    disp(
+        enc,
+        "row_terms",
+        &[
+            (0, u_m),
+            (1, bufs.y_o),
+            (2, bufs.lc_o),
+            (3, bufs.uc_o),
+            (6, bufs.rterm),
+        ],
+        wgs(m),
+    );
+
     red.record_dot(dev, enc, k, bufs.rp, bufs.rp, m, results, base);
     red.record_dot(dev, enc, k, bufs.rd, bufs.rd, n, results, base + 1);
     red.record_sum(dev, enc, k, bufs.bterm, n, results, base + 2);
@@ -610,12 +631,12 @@ fn eval_from(vals: &[f32], base: usize, obj_offset: f64, q_norm: f64, c_norm: f6
 /// lower bound; snapping the noise to 0 restores the same finite, meaningful gap
 /// the f64 reference (whose duals are already clean) converges on. The true dual
 /// of an inactive constraint is exactly 0, so this only removes numerical dirt.
-fn project_dual(p: &LpProblem, y: &mut [f64]) {
+fn project_dual(row_lower: &[f64], row_upper: &[f64], y: &mut [f64]) {
     for (i, yi) in y.iter_mut().enumerate() {
-        if !p.row_upper[i].is_finite() && *yi > 0.0 {
+        if !row_upper[i].is_finite() && *yi > 0.0 {
             *yi = 0.0;
         }
-        if !p.row_lower[i].is_finite() && *yi < 0.0 {
+        if !row_lower[i].is_finite() && *yi < 0.0 {
             *yi = 0.0;
         }
     }
