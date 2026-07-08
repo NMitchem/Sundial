@@ -3,3 +3,6 @@ web/node_modules
 web/dist
 crates/sundial-core/pkg
 crates/sundial-mps/pkg
+bench/
+/results.csv
+/report.md

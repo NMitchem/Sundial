@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use sundial_core::problem::{ProgressEvent, Solution, SolveOptions};
 
+mod report;
+
 #[derive(Parser)]
 #[command(
     name = "sundial",
@@ -43,6 +45,14 @@ enum Cmd {
         #[arg(long, value_enum, default_value_t = Engine::Gpu)]
         engine: Engine,
         #[arg(long, default_value = "results.csv")]
+        out: PathBuf,
+    },
+    /// Render a bench results CSV + known optima into report.md
+    Report {
+        csv: PathBuf,
+        #[arg(long)]
+        optima: Option<PathBuf>,
+        #[arg(long, default_value = "report.md")]
         out: PathBuf,
     },
     /// Solve a generated optimal-transport instance (the M1 hero)
@@ -87,6 +97,10 @@ fn report<'a>(name: &'a str, s: &Solution) -> Report<'a> {
         rel_dual: s.stats.verified.rel_dual,
         rel_gap: s.stats.verified.rel_gap,
     }
+}
+
+fn csv_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "\"\""))
 }
 
 fn solve_file(
@@ -191,7 +205,7 @@ fn main() -> Result<()> {
                         );
                         rows.push(format!(
                             "{},{},{},{},{:.1},{:.3e},{:.3e},{:.3e}",
-                            r.name,
+                            csv_quote(r.name),
                             r.status,
                             r.objective,
                             r.iterations,
@@ -202,12 +216,25 @@ fn main() -> Result<()> {
                         ));
                     }
                     Err(e) => {
-                        println!("{name}: ERROR {e}");
-                        rows.push(format!("{name},Error,,,,,,"));
+                        println!("{name}: ERROR {e:#}");
+                        let chain = format!("{e:#}").replace(',', ";");
+                        rows.push(format!("{},Error: {chain},,,,,,", csv_quote(&name)));
                     }
                 }
             }
             std::fs::write(&out, rows.join("\n") + "\n")?;
+            println!("wrote {}", out.display());
+        }
+        Cmd::Report { csv, optima, out } => {
+            let csv_text = std::fs::read_to_string(&csv)
+                .with_context(|| format!("reading {}", csv.display()))?;
+            let optima_text = match optima {
+                Some(p) => std::fs::read_to_string(&p)
+                    .with_context(|| format!("reading {}", p.display()))?,
+                None => include_str!("../data/netlib_optima.csv").to_string(),
+            };
+            let md = report::render(&csv_text, &report::parse_optima(&optima_text));
+            std::fs::write(&out, &md)?;
             println!("wrote {}", out.display());
         }
         Cmd::Transport {
