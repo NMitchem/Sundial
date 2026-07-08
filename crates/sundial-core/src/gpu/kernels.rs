@@ -39,6 +39,8 @@ const TABLE: &[(&str, &str)] = &[
     ("reduce", "reduce_dot"),
     ("reduce", "reduce_sum"),
     ("reduce", "reduce_maxabs"),
+    ("transport", "ot_apply"),
+    ("transport", "ot_apply_t"),
 ];
 
 impl Kernels {
@@ -47,6 +49,7 @@ impl Kernels {
             ("pdhg", include_str!("shaders/pdhg.wgsl")),
             ("residuals", include_str!("shaders/residuals.wgsl")),
             ("reduce", include_str!("shaders/reduce.wgsl")),
+            ("transport", include_str!("shaders/transport.wgsl")),
         ]);
         let mut modules: HashMap<&str, wgpu::ShaderModule> = HashMap::new();
         for (name, src) in sources {

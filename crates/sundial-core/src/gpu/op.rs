@@ -129,3 +129,74 @@ impl GpuOp for CsrGpuOp {
         pass_dispatch(enc, pl, &bg, wgs(self.n));
     }
 }
+
+fn tparams_bytes(ns: u32, nt: u32, n: u32, stride: u32) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    out[0..4].copy_from_slice(&ns.to_le_bytes());
+    out[4..8].copy_from_slice(&nt.to_le_bytes());
+    out[8..12].copy_from_slice(&n.to_le_bytes());
+    out[12..16].copy_from_slice(&stride.to_le_bytes());
+    out
+}
+
+/// The transport incidence operator: never materializes a matrix — `A·x`
+/// is row/col sums, `Aᵀ·y` is a rank-structured broadcast (transport.wgsl).
+pub struct TransportGpuOp {
+    ns: usize,
+    nt: usize,
+    u_apply: wgpu::Buffer,   // stride sized for the m-row dispatch
+    u_apply_t: wgpu::Buffer, // stride sized for the n-element dispatch
+}
+
+impl TransportGpuOp {
+    pub fn new(dev: &wgpu::Device, ns: usize, nt: usize) -> Self {
+        let (m, n) = (ns + nt, ns * nt);
+        Self {
+            ns,
+            nt,
+            u_apply: buffers::uniform_bytes(
+                dev,
+                &tparams_bytes(ns as u32, nt as u32, n as u32, wgs(m) * WG),
+                "ot_u_apply",
+            ),
+            u_apply_t: buffers::uniform_bytes(
+                dev,
+                &tparams_bytes(ns as u32, nt as u32, n as u32, wgs(n) * WG),
+                "ot_u_apply_t",
+            ),
+        }
+    }
+}
+
+impl GpuOp for TransportGpuOp {
+    fn n_rows(&self) -> usize {
+        self.ns + self.nt
+    }
+    fn n_cols(&self) -> usize {
+        self.ns * self.nt
+    }
+    fn record_apply(
+        &self,
+        dev: &wgpu::Device,
+        k: &Kernels,
+        enc: &mut wgpu::CommandEncoder,
+        x: &wgpu::Buffer,
+        out: &wgpu::Buffer,
+    ) {
+        let pl = k.pipeline("ot_apply");
+        let bg = kernels::bind(dev, pl, &[(0, &self.u_apply), (1, x), (6, out)]);
+        pass_dispatch(enc, pl, &bg, wgs(self.ns + self.nt));
+    }
+    fn record_apply_t(
+        &self,
+        dev: &wgpu::Device,
+        k: &Kernels,
+        enc: &mut wgpu::CommandEncoder,
+        y: &wgpu::Buffer,
+        out: &wgpu::Buffer,
+    ) {
+        let pl = k.pipeline("ot_apply_t");
+        let bg = kernels::bind(dev, pl, &[(0, &self.u_apply_t), (1, y), (6, out)]);
+        pass_dispatch(enc, pl, &bg, wgs(self.ns * self.nt));
+    }
+}
