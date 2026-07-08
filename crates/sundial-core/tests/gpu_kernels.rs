@@ -259,3 +259,36 @@ fn residual_terms_project_open_bounds_to_zero() {
     assert_eq!(got_rt[1], 0.0);
     assert_eq!(got_rt[3], 0.0);
 }
+
+#[test]
+#[ignore = "requires GPU"]
+fn batched_reductions_match_individual() {
+    use sundial_core::gpu::kernels::{Kernels, Reducer};
+    use sundial_core::gpu::{buffers, GpuContext};
+    let ctx = pollster::block_on(GpuContext::new()).expect("no GPU");
+    let k = Kernels::new(&ctx.device);
+    let n = 100_000usize;
+    let mut rng = fastrand::Rng::with_seed(7);
+    let a: Vec<f32> = (0..n).map(|_| rng.f32() * 2.0 - 1.0).collect();
+    let b: Vec<f32> = (0..n).map(|_| rng.f32() * 2.0 - 1.0).collect();
+    let ab = buffers::storage_f32(&ctx.device, &a, "a");
+    let bb = buffers::storage_f32(&ctx.device, &b, "b");
+    let red = Reducer::new(&ctx.device, n);
+    let results = buffers::storage_zeros_f32(&ctx.device, 3, "results");
+
+    // batched: all three reductions recorded into ONE encoder, ONE readback
+    let mut enc = ctx.device.create_command_encoder(&Default::default());
+    red.record_dot(&ctx.device, &mut enc, &k, &ab, &bb, n, &results, 0);
+    red.record_sum(&ctx.device, &mut enc, &k, &ab, n, &results, 1);
+    red.record_maxabs(&ctx.device, &mut enc, &k, &ab, n, &results, 2);
+    ctx.queue.submit([enc.finish()]);
+    let vals = pollster::block_on(buffers::readback_f32(&ctx.device, &ctx.queue, &results, 3));
+
+    // individual async calls (existing API)
+    let dot = pollster::block_on(red.dot(&ctx, &k, &ab, &bb, n));
+    let sum = pollster::block_on(red.sum(&ctx, &k, &ab, n));
+    let mx = pollster::block_on(red.maxabs(&ctx, &k, &ab, n));
+    assert_eq!(vals[0], dot, "dot mismatch");
+    assert_eq!(vals[1], sum, "sum mismatch");
+    assert_eq!(vals[2], mx, "maxabs mismatch");
+}

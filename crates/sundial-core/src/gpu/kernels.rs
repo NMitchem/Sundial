@@ -125,17 +125,23 @@ impl Reducer {
         }
     }
 
+    /// Record a full multi-pass reduction into `enc`; the final scalar is
+    /// copied into `results[slot]`. Reductions recorded earlier in the same
+    /// encoder complete (submission order) before later ones reuse scratch.
     #[allow(clippy::too_many_arguments)]
-    async fn run(
+    pub fn record(
         &self,
-        ctx: &GpuContext,
+        dev: &wgpu::Device,
+        enc: &mut wgpu::CommandEncoder,
         k: &Kernels,
         first: &str,
         a: &wgpu::Buffer,
         b: Option<&wgpu::Buffer>,
         n: usize,
         follow: &str,
-    ) -> f32 {
+        results: &wgpu::Buffer,
+        slot: u32,
+    ) {
         let mut len = n;
         let mut src: &wgpu::Buffer = a;
         let mut dst = &self.scratch_a;
@@ -149,19 +155,18 @@ impl Reducer {
                 sigma: 0.0,
                 w: 0.0,
             };
-            let ubuf = buffers::uniform_bytes(&ctx.device, &params.bytes(), "reduce_params");
+            let ubuf = buffers::uniform_bytes(dev, &params.bytes(), "reduce_params");
             let pl = k.pipeline(entry);
             let mut e: Vec<(u32, &wgpu::Buffer)> = vec![(0, &ubuf), (1, src), (6, dst)];
             if entry == "reduce_dot" {
                 e.push((2, b.expect("dot needs b")));
             }
-            let bg = bind(&ctx.device, pl, &e);
-            let mut enc = ctx.device.create_command_encoder(&Default::default());
-            pass_dispatch(&mut enc, pl, &bg, wgs);
-            ctx.queue.submit([enc.finish()]);
+            let bg = bind(dev, pl, &e);
+            pass_dispatch(enc, pl, &bg, wgs);
             len = wgs as usize;
             if len == 1 {
-                return buffers::readback_f32(&ctx.device, &ctx.queue, dst, 1).await[0];
+                enc.copy_buffer_to_buffer(dst, 0, results, (slot as u64) * 4, 4);
+                return;
             }
             src = dst;
             dst = if std::ptr::eq(dst, &self.scratch_a) {
@@ -171,6 +176,64 @@ impl Reducer {
             };
             entry = follow;
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_dot(
+        &self,
+        dev: &wgpu::Device,
+        enc: &mut wgpu::CommandEncoder,
+        k: &Kernels,
+        a: &wgpu::Buffer,
+        b: &wgpu::Buffer,
+        n: usize,
+        results: &wgpu::Buffer,
+        slot: u32,
+    ) {
+        self.record(dev, enc, k, "reduce_dot", a, Some(b), n, "reduce_sum", results, slot);
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_sum(
+        &self,
+        dev: &wgpu::Device,
+        enc: &mut wgpu::CommandEncoder,
+        k: &Kernels,
+        a: &wgpu::Buffer,
+        n: usize,
+        results: &wgpu::Buffer,
+        slot: u32,
+    ) {
+        self.record(dev, enc, k, "reduce_sum", a, None, n, "reduce_sum", results, slot);
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_maxabs(
+        &self,
+        dev: &wgpu::Device,
+        enc: &mut wgpu::CommandEncoder,
+        k: &Kernels,
+        a: &wgpu::Buffer,
+        n: usize,
+        results: &wgpu::Buffer,
+        slot: u32,
+    ) {
+        self.record(dev, enc, k, "reduce_maxabs", a, None, n, "reduce_maxabs", results, slot);
+    }
+
+    async fn run(
+        &self,
+        ctx: &GpuContext,
+        k: &Kernels,
+        first: &str,
+        a: &wgpu::Buffer,
+        b: Option<&wgpu::Buffer>,
+        n: usize,
+        follow: &str,
+    ) -> f32 {
+        let results = buffers::storage_zeros_f32(&ctx.device, 1, "reduce_result");
+        let mut enc = ctx.device.create_command_encoder(&Default::default());
+        self.record(&ctx.device, &mut enc, k, first, a, b, n, follow, &results, 0);
+        ctx.queue.submit([enc.finish()]);
+        buffers::readback_f32(&ctx.device, &ctx.queue, &results, 1).await[0]
     }
 
     pub async fn dot(
