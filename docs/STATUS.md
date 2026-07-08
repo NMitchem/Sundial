@@ -27,6 +27,7 @@ Updated: 2026-07-07 (M0 completion)
 
 - `docs/superpowers/specs/2026-07-07-sundial-design.md` — approved spec: architecture, milestones, launch bar, platform constraints
 - `docs/superpowers/plans/2026-07-07-sundial-m0.md` — M0 plan (normative, includes all mid-flight adjudications)
+- `docs/superpowers/plans/2026-07-07-sundial-m1.md` — M1 plan (12 tasks; written 2026-07-07, execution pending)
 - `docs/superpowers/m1-backlog.md` — minor items carried from M0's final review
 - `or-project-proposals.md` — the original OR project survey (Sundial plus 4 other adversarially-vetted proposals)
 
