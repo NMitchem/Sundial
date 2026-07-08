@@ -53,7 +53,7 @@ pub async fn readback_f32(
     src: &wgpu::Buffer,
     count: usize,
 ) -> Vec<f32> {
-    let size = (count * 4) as u64;
+    let size = (count * std::mem::size_of::<f32>()) as u64;
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("staging"),
         size,

@@ -219,7 +219,12 @@ pub fn solve_view(
     let x = unscale(scaling, &st.x, true);
     let y = unscale(scaling, &st.y, false);
     let verified: KktResiduals = kkt::residuals_view(original, &x, &y);
-    debug_assert!(status != SolveStatus::Optimal || verified.mu() <= opts.tol);
+    assert!(
+        status != SolveStatus::Optimal || verified.mu() <= opts.tol,
+        "honesty violation: Optimal status with verified mu {} > tol {}",
+        verified.mu(),
+        opts.tol
+    );
     let primal_obj = verified.primal_obj;
     Solution {
         x,

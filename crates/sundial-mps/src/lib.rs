@@ -72,6 +72,7 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
     let mut ranges: Vec<Option<f64>> = Vec::new(); // per row
     let mut bounds_lo: Vec<Option<f64>> = Vec::new(); // per col, None = default 0
     let mut bounds_up: Vec<Option<f64>> = Vec::new(); // per col, None = default +inf
+    let mut up_negative: Vec<bool> = Vec::new(); // per col, true if UP < 0 seen
 
     for (lineno0, raw) in text.lines().enumerate() {
         let lineno = lineno0 + 1;
@@ -119,6 +120,9 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
                         obj_row = Some(rname); // later N rows ignored
                     }
                 } else {
+                    if row_index.contains_key(&rname) {
+                        return Err(err(lineno, format!("duplicate row '{rname}'")));
+                    }
                     row_index.insert(rname, row_types.len());
                     row_types.push(ty);
                     rhs_pre_range.push(0.0);
@@ -138,6 +142,7 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
                     c.push(0.0);
                     bounds_lo.push(None);
                     bounds_up.push(None);
+                    up_negative.push(false);
                     col_order.len() - 1
                 });
                 for pair in toks[1..].chunks(2) {
@@ -205,7 +210,12 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
                     0.0
                 };
                 match bt {
-                    "UP" => bounds_up[j] = Some(val),
+                    "UP" => {
+                        bounds_up[j] = Some(val);
+                        if val < 0.0 {
+                            up_negative[j] = true;
+                        }
+                    }
                     "LO" => bounds_lo[j] = Some(val),
                     "FX" => {
                         bounds_lo[j] = Some(val);
@@ -266,7 +276,13 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
 
     // column bounds from defaults + BOUNDS
     let n = col_order.len();
-    let col_lower: Vec<f64> = (0..n).map(|j| bounds_lo[j].unwrap_or(0.0)).collect();
+    // Classical MPS quirk: a negative UP bound on a column with NO explicit
+    // lower bound implies lower = -inf rather than the default 0 (otherwise
+    // the column would be infeasible-by-default; lp_solve/CPLEX semantics).
+    // An explicit LO/FX/MI/FR wins regardless of line order.
+    let col_lower: Vec<f64> = (0..n)
+        .map(|j| bounds_lo[j].unwrap_or(if up_negative[j] { -inf } else { 0.0 }))
+        .collect();
     let col_upper: Vec<f64> = (0..n).map(|j| bounds_up[j].unwrap_or(inf)).collect();
 
     // triplets -> CSR (sorted by row, then col)

@@ -677,16 +677,15 @@ fn eval_from(vals: &[f32], base: usize, obj_offset: f64, q_norm: f64, c_norm: f6
     }
 }
 
-/// Project the (f64) dual onto row-dual feasibility in place before the
-/// authoritative `kkt::residuals` check. f32 iteration leaves ~1e-7 wrong-sign
-/// noise on the duals of inactive rows; against an OPEN row bound that noise
-/// drives `kkt::residuals`' dual objective to −∞ (NaN gap), which `mu()` then
-/// silently drops — so the gap can never gate termination and the reported
-/// objective stays as loose as bare primal feasibility. A feasible dual needs
-/// `y_i ≤ 0` where the row has no upper bound and `y_i ≥ 0` where it has no
-/// lower bound; snapping the noise to 0 restores the same finite, meaningful gap
-/// the f64 reference (whose duals are already clean) converges on. The true dual
-/// of an inactive constraint is exactly 0, so this only removes numerical dirt.
+/// Project the (f64) dual onto row-dual sign feasibility in place before the
+/// authoritative `kkt::residuals_view` check. f32 iteration leaves ~1e-7
+/// wrong-sign noise on the duals of inactive rows; against an OPEN row bound
+/// that noise is dual-INFEASIBLE and would be charged to the dual residual,
+/// keeping r_d artificially above tight tolerances. The dual objective itself
+/// is safe either way — `kkt.rs` evaluates it at the sign-cone projection
+/// (projected-multiplier convention), so no ±inf can arise there. The true
+/// dual of an inactive constraint is exactly 0; snapping the noise to 0 only
+/// removes numerical dirt, and the returned solution IS the verified point.
 fn project_dual(row_lower: &[f64], row_upper: &[f64], y: &mut [f64]) {
     for (i, yi) in y.iter_mut().enumerate() {
         if !row_upper[i].is_finite() && *yi > 0.0 {

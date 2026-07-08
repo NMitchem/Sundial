@@ -77,3 +77,55 @@ fn error_carries_line_number() {
     let err = parse_str(text).unwrap_err();
     assert!(format!("{err}").contains("line 4"), "got: {err}");
 }
+
+fn parse_err(text: &str) -> String {
+    sundial_mps::parse_str(text).unwrap_err().to_string()
+}
+
+#[test]
+fn missing_endata_is_an_error() {
+    let e = parse_err("NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n");
+    assert!(e.contains("missing ENDATA"), "{e}");
+}
+
+#[test]
+fn missing_objective_row_is_an_error() {
+    let e = parse_err("NAME t\nROWS\n L r1\nCOLUMNS\n x r1 1.0\nRHS\nENDATA\n");
+    assert!(e.contains("no objective"), "{e}");
+}
+
+#[test]
+fn duplicate_constraint_row_is_an_error() {
+    let e =
+        parse_err("NAME t\nROWS\n N obj\n L r1\n G r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\nENDATA\n");
+    assert!(e.contains("duplicate row 'r1'"), "{e}");
+}
+
+#[test]
+fn data_line_outside_section_is_an_error() {
+    let e = parse_err(" x obj 1.0\nROWS\n N obj\nENDATA\n");
+    assert!(e.contains("outside any section"), "{e}");
+}
+
+#[test]
+fn negative_up_without_lo_opens_lower_bound() {
+    // Classical MPS convention: UP < 0 with no explicit LO ⇒ lower = -inf.
+    let p = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n rhs r1 5.0\nBOUNDS\n UP bnd x -2.0\nENDATA\n",
+    ).unwrap();
+    assert_eq!(p.col_upper[0], -2.0);
+    assert_eq!(p.col_lower[0], f64::NEG_INFINITY);
+}
+
+#[test]
+fn negative_up_with_explicit_lo_keeps_lo() {
+    let p = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n rhs r1 5.0\nBOUNDS\n LO bnd x -9.0\n UP bnd x -2.0\nENDATA\n",
+    ).unwrap();
+    assert_eq!(p.col_lower[0], -9.0);
+    // order must not matter:
+    let p2 = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n rhs r1 5.0\nBOUNDS\n UP bnd x -2.0\n LO bnd x -9.0\nENDATA\n",
+    ).unwrap();
+    assert_eq!(p2.col_lower[0], -9.0);
+}
