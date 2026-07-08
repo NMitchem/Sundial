@@ -46,6 +46,7 @@ pub async fn solve_gpu(
     let dev = &ctx.device;
     let k = Kernels::new(dev);
     let red = Reducer::new(dev, n.max(m));
+    let results = buffers::storage_zeros_f32(dev, 16, "results");
 
     // ---- pack + upload ----
     let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|&x| x as f32).collect() };
@@ -300,20 +301,14 @@ pub async fn solve_gpu(
             (&x_new, &y_new)
         };
 
-        // NaN/overflow watchdog
-        let mx = red.maxabs(ctx, &k, x_cur, n).await;
-        if !mx.is_finite() || mx > 1e29 {
-            status = SolveStatus::NumericalBreakdown;
-            break 'outer;
-        }
-
-        // averages: xa = sum_x / count, ya = sum_y / count
+        // ---- one encoder per check: averages + watchdog + both evals ----
+        let mut enc = dev.create_command_encoder(&Default::default());
         {
             let u_avg_n = buffers::uniform_bytes(
                 dev,
                 &ParamsData {
                     n: n as u32,
-                    stride: 0,
+                    stride: wgs(n) * WG,
                     tau,
                     sigma,
                     w: 1.0 / count as f32,
@@ -325,7 +320,7 @@ pub async fn solve_gpu(
                 dev,
                 &ParamsData {
                     n: m as u32,
-                    stride: 0,
+                    stride: wgs(m) * WG,
                     tau,
                     sigma,
                     w: 1.0 / count as f32,
@@ -333,7 +328,6 @@ pub async fn solve_gpu(
                 .bytes(),
                 "u_avg_m",
             );
-            let mut enc = dev.create_command_encoder(&Default::default());
             for (ub, src, dst, len) in [(&u_avg_n, &sum_x, &xa, n), (&u_avg_m, &sum_y, &ya, m)] {
                 let pl = k.pipeline("ew_scale");
                 let bg = kernels::bind(dev, pl, &[(0, ub), (1, src), (6, dst)]);
@@ -342,41 +336,25 @@ pub async fn solve_gpu(
                 pass.set_bind_group(0, &bg, &[]);
                 pass.dispatch_workgroups(wgs(len), 1, 1);
             }
-            ctx.queue.submit([enc.finish()]);
         }
+        red.record_maxabs(dev, &mut enc, &k, x_cur, n, &results, 0);
+        record_eval(
+            dev, &mut enc, &k, &red, &u_n, &u_m, &bufs, x_cur, y_cur, n, m, &results, 1,
+        );
+        record_eval(
+            dev, &mut enc, &k, &red, &u_n, &u_m, &bufs, &xa, &ya, n, m, &results, 6,
+        );
+        ctx.queue.submit([enc.finish()]);
+        let vals = buffers::readback_f32(dev, &ctx.queue, &results, 11).await;
 
-        let e_cur = eval(
-            ctx,
-            &k,
-            &red,
-            &u_n,
-            &u_m,
-            &bufs,
-            x_cur,
-            y_cur,
-            n,
-            m,
-            p.obj_offset,
-            q_norm,
-            c_norm,
-        )
-        .await;
-        let e_avg = eval(
-            ctx,
-            &k,
-            &red,
-            &u_n,
-            &u_m,
-            &bufs,
-            &xa,
-            &ya,
-            n,
-            m,
-            p.obj_offset,
-            q_norm,
-            c_norm,
-        )
-        .await;
+        // NaN/overflow watchdog (evaluations for a broken iterate are unused)
+        let mx = vals[0];
+        if !mx.is_finite() || mx > 1e29 {
+            status = SolveStatus::NumericalBreakdown;
+            break 'outer;
+        }
+        let e_cur = eval_from(&vals, 1, p.obj_offset, q_norm, c_norm);
+        let e_avg = eval_from(&vals, 6, p.obj_offset, q_norm, c_norm);
         let (e_cand, cand_x, cand_y, cand_is_avg) = if e_avg.mu < e_cur.mu {
             (&e_avg, &xa, &ya, true)
         } else {
@@ -490,11 +468,13 @@ struct EvalBufs<'a> {
     y_o: &'a wgpu::Buffer,
 }
 
-// ---- residual evaluation for a candidate (x_buf, y_buf) ----
-// Returns f32 GPU metrics converted to f64 with host denominators.
+/// Record the 8 residual kernels + 5 reduction chains for candidate
+/// (x_buf, y_buf) into `enc`. Scalars land in results[base..base+5]:
+/// [‖r_p‖², ‖r_d‖², Σ bterm, Σ rterm, c̄ᵀx̄].
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-async fn eval(
-    ctx: &GpuContext,
+fn record_eval(
+    dev: &wgpu::Device,
+    enc: &mut wgpu::CommandEncoder,
     k: &Kernels,
     red: &Reducer,
     u_n: &wgpu::Buffer,
@@ -504,12 +484,9 @@ async fn eval(
     y_buf: &wgpu::Buffer,
     n: usize,
     m: usize,
-    obj_offset: f64,
-    q_norm: f64,
-    c_norm: f64,
-) -> EvalOut {
-    let dev = &ctx.device;
-    let mut enc = dev.create_command_encoder(&Default::default());
+    results: &wgpu::Buffer,
+    base: u32,
+) {
     let steps: [(&str, Vec<(u32, &wgpu::Buffer)>, u32); 8] = [
         (
             "spmv",
@@ -594,14 +571,21 @@ async fn eval(
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(w, 1, 1);
     }
-    ctx.queue.submit([enc.finish()]);
+    red.record_dot(dev, enc, k, bufs.rp, bufs.rp, m, results, base);
+    red.record_dot(dev, enc, k, bufs.rd, bufs.rd, n, results, base + 1);
+    red.record_sum(dev, enc, k, bufs.bterm, n, results, base + 2);
+    red.record_sum(dev, enc, k, bufs.rterm, m, results, base + 3);
+    red.record_dot(dev, enc, k, bufs.c_s, x_buf, n, results, base + 4);
+}
 
-    let rp2 = red.dot(ctx, k, bufs.rp, bufs.rp, m).await as f64;
-    let rd2 = red.dot(ctx, k, bufs.rd, bufs.rd, n).await as f64;
-    let bsum = red.sum(ctx, k, bufs.bterm, n).await as f64;
-    let rsum = red.sum(ctx, k, bufs.rterm, m).await as f64;
-    let cx = red.dot(ctx, k, bufs.c_s, x_buf, n).await as f64; // c̄ᵀx̄ = cᵀx
-
+/// Convert packed scalar slots into relative residuals (host f64 math
+/// identical to the old `eval` tail).
+fn eval_from(vals: &[f32], base: usize, obj_offset: f64, q_norm: f64, c_norm: f64) -> EvalOut {
+    let rp2 = vals[base] as f64;
+    let rd2 = vals[base + 1] as f64;
+    let bsum = vals[base + 2] as f64;
+    let rsum = vals[base + 3] as f64;
+    let cx = vals[base + 4] as f64;
     let rel_p = rp2.max(0.0).sqrt() / (1.0 + q_norm);
     let rel_d = rd2.max(0.0).sqrt() / (1.0 + c_norm);
     let pobj = cx + obj_offset;

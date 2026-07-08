@@ -190,7 +190,18 @@ impl Reducer {
         results: &wgpu::Buffer,
         slot: u32,
     ) {
-        self.record(dev, enc, k, "reduce_dot", a, Some(b), n, "reduce_sum", results, slot);
+        self.record(
+            dev,
+            enc,
+            k,
+            "reduce_dot",
+            a,
+            Some(b),
+            n,
+            "reduce_sum",
+            results,
+            slot,
+        );
     }
     #[allow(clippy::too_many_arguments)]
     pub fn record_sum(
@@ -203,7 +214,18 @@ impl Reducer {
         results: &wgpu::Buffer,
         slot: u32,
     ) {
-        self.record(dev, enc, k, "reduce_sum", a, None, n, "reduce_sum", results, slot);
+        self.record(
+            dev,
+            enc,
+            k,
+            "reduce_sum",
+            a,
+            None,
+            n,
+            "reduce_sum",
+            results,
+            slot,
+        );
     }
     #[allow(clippy::too_many_arguments)]
     pub fn record_maxabs(
@@ -216,9 +238,21 @@ impl Reducer {
         results: &wgpu::Buffer,
         slot: u32,
     ) {
-        self.record(dev, enc, k, "reduce_maxabs", a, None, n, "reduce_maxabs", results, slot);
+        self.record(
+            dev,
+            enc,
+            k,
+            "reduce_maxabs",
+            a,
+            None,
+            n,
+            "reduce_maxabs",
+            results,
+            slot,
+        );
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         &self,
         ctx: &GpuContext,
@@ -231,7 +265,18 @@ impl Reducer {
     ) -> f32 {
         let results = buffers::storage_zeros_f32(&ctx.device, 1, "reduce_result");
         let mut enc = ctx.device.create_command_encoder(&Default::default());
-        self.record(&ctx.device, &mut enc, k, first, a, b, n, follow, &results, 0);
+        self.record(
+            &ctx.device,
+            &mut enc,
+            k,
+            first,
+            a,
+            b,
+            n,
+            follow,
+            &results,
+            0,
+        );
         ctx.queue.submit([enc.finish()]);
         buffers::readback_f32(&ctx.device, &ctx.queue, &results, 1).await[0]
     }
