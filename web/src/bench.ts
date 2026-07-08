@@ -86,5 +86,5 @@ drop.addEventListener("drop", async (e) => {
   const file = e.dataTransfer?.files?.[0];
   if (!file) return;
   const bytes = new Uint8Array(await file.arrayBuffer());
-  await run(file.name.replace(/\.(mps|gz)+$/g, ""), () => solveMpsBytes(bytes, 1e-4, onProgress));
+  await run(file.name.replace(/(\.(mps|gz))+$/, ""), () => solveMpsBytes(bytes, 1e-4, onProgress));
 });
