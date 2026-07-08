@@ -50,6 +50,7 @@ pub async fn solve_gpu(
         opts,
         progress,
         None,
+        false, // explicit path is Ruiz+PC-scaled; no primal weighting
     )
     .await
 }
@@ -82,7 +83,10 @@ pub async fn solve_gpu_op<O: crate::linop::LinOp>(
     let norm_a = crate::linop::op_norm2(&p.op, opts.seed);
     let s = scale::Scaling::identity(p.n_cons(), p.n_vars());
     let v = p.view();
-    solve_core(ctx, &v, &v, &s, norm_a, gpu_op, opts, progress, snapshot).await
+    solve_core(
+        ctx, &v, &v, &s, norm_a, gpu_op, opts, progress, snapshot, true,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -96,10 +100,28 @@ async fn solve_core(
     opts: &SolveOptions,
     progress: &mut dyn FnMut(ProgressEvent),
     mut snapshot: Option<&mut dyn FnMut(SnapshotEvent<'_>)>,
+    // Primal-weight balancing is applied only on the unscaled (matrix-free)
+    // path; the explicit path is already Ruiz+PC-equilibrated.
+    primal_weight: bool,
 ) -> Result<Solution, GpuError> {
     let start = Instant::now();
     let (m, n) = (gpu_op.n_rows(), gpu_op.n_cols());
-    let (tau, sigma) = ((0.9 / norm_a) as f32, (0.9 / norm_a) as f32);
+    // Primal-weight balancing (ω) is applied ONLY on the unscaled path (the
+    // matrix-free operator entry). The explicit path arrives here already
+    // Ruiz+PC-equilibrated — that scaling already sets the primal/dual step
+    // balance, so PDLP's ω = ‖c‖/‖q‖ would double-correct it and drive a
+    // restart limit-cycle (observed: Netlib share2b failing to converge on the
+    // f32 GPU). On the unscaled transport hero it is the only step balancing and
+    // is what takes the 1M gate from a 500k-iter stall to ~16k iters. See
+    // `weight.rs` and the CPU `solve_view` gate (`scaling.is_none()`).
+    let mut omega = if primal_weight {
+        let (q_it, c_it) = kkt::denominators_view(it); // ITERATE-space ω₀
+        crate::weight::initial_primal_weight(q_it, c_it)
+    } else {
+        1.0
+    };
+    let mut tau = (0.9 / (norm_a * omega)) as f32;
+    let mut sigma = (0.9 * omega / norm_a) as f32;
     let (q_norm, c_norm) = kkt::denominators_view(orig); // ORIGINAL-space denominators, f64
     let dev = &ctx.device;
     let k = Kernels::new(dev);
@@ -437,6 +459,40 @@ async fn solve_core(
             enc.copy_buffer_to_buffer(x_cur, 0, &sum_x, 0, (n * 4) as u64);
             enc.copy_buffer_to_buffer(y_cur, 0, &sum_y, 0, (m * 4) as u64);
             ctx.queue.submit([enc.finish()]);
+            // Residual-balance the primal weight (unscaled path only), then
+            // rewrite τ/σ into the two static uniforms IN PLACE (buffers are
+            // COPY_DST; the prebuilt bind groups keep pointing at them).
+            // write_buffer is ordered before the next submit, so the next
+            // iteration batch runs with the new steps.
+            if primal_weight {
+                omega = crate::weight::update_primal_weight(omega, e_cand.rel_p, e_cand.rel_d);
+                tau = (0.9 / (norm_a * omega)) as f32;
+                sigma = (0.9 * omega / norm_a) as f32;
+                ctx.queue.write_buffer(
+                    &u_n,
+                    0,
+                    &ParamsData {
+                        n: n as u32,
+                        stride: wgs(n) * WG,
+                        tau,
+                        sigma,
+                        w: 0.0,
+                    }
+                    .bytes(),
+                );
+                ctx.queue.write_buffer(
+                    &u_m,
+                    0,
+                    &ParamsData {
+                        n: m as u32,
+                        stride: wgs(m) * WG,
+                        tau,
+                        sigma,
+                        w: 0.0,
+                    }
+                    .bytes(),
+                );
+            }
             count = 1;
             mu_last_restart = e_cand.mu;
             iters_since_restart = 0;

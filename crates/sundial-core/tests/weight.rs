@@ -16,8 +16,14 @@ fn initial_weight_degenerate_norms_fall_back_to_one() {
 
 #[test]
 fn initial_weight_clamps() {
-    assert_eq!(initial_primal_weight(1e-10_f64.sqrt(), 1e10_f64.sqrt()), OMEGA_MAX);
-    assert_eq!(initial_primal_weight(1e10_f64.sqrt(), 1e-10_f64.sqrt()), OMEGA_MIN);
+    assert_eq!(
+        initial_primal_weight(1e-10_f64.sqrt(), 1e10_f64.sqrt()),
+        OMEGA_MAX
+    );
+    assert_eq!(
+        initial_primal_weight(1e10_f64.sqrt(), 1e-10_f64.sqrt()),
+        OMEGA_MIN
+    );
 }
 
 #[test]
