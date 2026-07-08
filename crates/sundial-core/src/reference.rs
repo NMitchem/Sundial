@@ -6,21 +6,15 @@ use crate::scale;
 use web_time::Instant;
 
 pub fn power_iteration_norm(a: &CsrMatrix, at: &CsrMatrix, iters: usize, seed: u64) -> f64 {
-    let mut rng = fastrand::Rng::with_seed(seed);
-    let n = a.n_cols;
-    let mut v: Vec<f64> = (0..n).map(|_| rng.f64() - 0.5).collect();
-    let mut av = vec![0.0; a.n_rows];
-    let mut atav = vec![0.0; n];
-    let mut lambda = 0.0f64;
-    for _ in 0..iters {
-        let norm = v.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-30);
-        v.iter_mut().for_each(|x| *x /= norm);
-        a.mul(&v, &mut av);
-        at.mul(&av, &mut atav);
-        lambda = v.iter().zip(&atav).map(|(a, b)| a * b).sum::<f64>(); // Rayleigh quotient for AᵀA
-        std::mem::swap(&mut v, &mut atav);
+    crate::linop::power_iteration_norm_op(&crate::linop::CsrOp { a, at }, iters, seed)
+}
+
+fn unscale(scaling: Option<&scale::Scaling>, x: &[f64], is_col: bool) -> Vec<f64> {
+    match scaling {
+        Some(s) if is_col => s.unscale_x(x),
+        Some(s) => s.unscale_y(x),
+        None => x.to_vec(),
     }
-    lambda.max(1e-30).sqrt() // ‖A‖₂ = sqrt(λ_max(AᵀA))
 }
 
 struct State {
@@ -50,15 +44,38 @@ pub fn solve(
     opts: &SolveOptions,
     progress: &mut dyn FnMut(ProgressEvent),
 ) -> Solution {
+    let (sp, s) = scale::ruiz_pc(p, 10);
+    let norm_a = power_iteration_norm(&sp.a, &sp.at, 100, opts.seed);
+    solve_view(&sp.view(), &p.view(), Some(&s), norm_a, opts, progress)
+}
+
+pub fn solve_op<O: crate::linop::LinOp>(
+    p: &crate::problem::OpProblem<O>,
+    opts: &SolveOptions,
+    progress: &mut dyn FnMut(ProgressEvent),
+) -> Solution {
+    // Matrix-free problems solve UNSCALED (adjudication: the transport
+    // operator is an all-ones incidence structure — already balanced).
+    let norm_a = crate::linop::op_norm2(&p.op, opts.seed);
+    let v = p.view();
+    solve_view(&v, &v, None, norm_a, opts, progress)
+}
+
+pub fn solve_view(
+    iterate: &LpView,
+    original: &LpView,
+    scaling: Option<&scale::Scaling>,
+    norm_a: f64,
+    opts: &SolveOptions,
+    progress: &mut dyn FnMut(ProgressEvent),
+) -> Solution {
     assert!(
         opts.check_every > 0,
         "SolveOptions::check_every must be > 0"
     );
     let start = Instant::now();
-    let (sp, s) = scale::ruiz_pc(p, 10);
-    let (m, n) = (sp.n_cons(), sp.n_vars());
+    let (m, n) = (iterate.op.n_rows(), iterate.op.n_cols());
 
-    let norm_a = power_iteration_norm(&sp.a, &sp.at, 100, opts.seed);
     let tau = 0.9 / norm_a;
     let sigma = 0.9 / norm_a;
 
@@ -71,7 +88,7 @@ pub fn solve(
     };
     // start feasible w.r.t. boxes: clamp 0 into [l_v, u_v]
     for j in 0..n {
-        st.x[j] = 0.0f64.clamp(sp.col_lower[j], sp.col_upper[j]);
+        st.x[j] = 0.0f64.clamp(iterate.col_lower[j], iterate.col_upper[j]);
     }
     st.x_avg.copy_from_slice(&st.x);
 
@@ -90,17 +107,17 @@ pub fn solve(
 
     while iter < opts.max_iters {
         // one PDHG iteration (see Math conventions)
-        sp.at.mul(&st.y, &mut aty);
+        iterate.op.apply_t(&st.y, &mut aty);
         for j in 0..n {
-            let v = st.x[j] - tau * (sp.c[j] + aty[j]);
-            let xn = v.clamp(sp.col_lower[j], sp.col_upper[j]);
+            let v = st.x[j] - tau * (iterate.c[j] + aty[j]);
+            let xn = v.clamp(iterate.col_lower[j], iterate.col_upper[j]);
             x_new[j] = xn;
             x_tilde[j] = 2.0 * xn - st.x[j];
         }
-        sp.a.mul(&x_tilde, &mut axt);
+        iterate.op.apply(&x_tilde, &mut axt);
         for (i, y_i) in st.y.iter_mut().enumerate() {
             let v = *y_i + sigma * axt[i];
-            *y_i = v - sigma * (v / sigma).clamp(sp.row_lower[i], sp.row_upper[i]);
+            *y_i = v - sigma * (v / sigma).clamp(iterate.row_lower[i], iterate.row_upper[i]);
         }
         std::mem::swap(&mut st.x, &mut x_new);
         iter += 1;
@@ -124,8 +141,16 @@ pub fn solve(
             // IMPORTANT: residuals for termination/restart are evaluated on the
             // ORIGINAL problem (scaled-space residuals passing tol does NOT
             // imply the real ones do). Unscale candidates first.
-            let r_cur = kkt::residuals(p, &s.unscale_x(&st.x), &s.unscale_y(&st.y));
-            let r_avg = kkt::residuals(p, &s.unscale_x(&st.x_avg), &s.unscale_y(&st.y_avg));
+            let r_cur = kkt::residuals_view(
+                original,
+                &unscale(scaling, &st.x, true),
+                &unscale(scaling, &st.y, false),
+            );
+            let r_avg = kkt::residuals_view(
+                original,
+                &unscale(scaling, &st.x_avg, true),
+                &unscale(scaling, &st.y_avg, false),
+            );
             let (mu_cand, cand_is_avg) = if r_avg.mu() < r_cur.mu() {
                 (r_avg.mu(), true)
             } else {
@@ -169,9 +194,9 @@ pub fn solve(
     }
 
     // unscale and record the authoritative f64 verification on the ORIGINAL problem
-    let x = s.unscale_x(&st.x);
-    let y = s.unscale_y(&st.y);
-    let verified: KktResiduals = kkt::residuals(p, &x, &y);
+    let x = unscale(scaling, &st.x, true);
+    let y = unscale(scaling, &st.y, false);
+    let verified: KktResiduals = kkt::residuals_view(original, &x, &y);
     debug_assert!(status != SolveStatus::Optimal || verified.mu() <= opts.tol);
     let primal_obj = verified.primal_obj;
     Solution {

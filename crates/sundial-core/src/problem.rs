@@ -205,3 +205,131 @@ pub struct ProgressEvent {
     pub rel_gap: f64,
     pub ms_per_iter: f64,
 }
+
+impl crate::linop::LinOp for LpProblem {
+    fn n_rows(&self) -> usize {
+        self.a.n_rows
+    }
+    fn n_cols(&self) -> usize {
+        self.a.n_cols
+    }
+    fn apply(&self, x: &[f64], out: &mut [f64]) {
+        self.a.mul(x, out)
+    }
+    fn apply_t(&self, y: &[f64], out: &mut [f64]) {
+        self.at.mul(y, out)
+    }
+}
+
+/// Borrowed, operator-generic view of a problem: everything the solver loop
+/// and the KKT certificate need, with the matrix behind `LinOp`.
+pub struct LpView<'a> {
+    pub op: &'a dyn crate::linop::LinOp,
+    pub c: &'a [f64],
+    pub obj_offset: f64,
+    pub row_lower: &'a [f64],
+    pub row_upper: &'a [f64],
+    pub col_lower: &'a [f64],
+    pub col_upper: &'a [f64],
+}
+
+impl LpProblem {
+    pub fn view(&self) -> LpView<'_> {
+        LpView {
+            op: self,
+            c: &self.c,
+            obj_offset: self.obj_offset,
+            row_lower: &self.row_lower,
+            row_upper: &self.row_upper,
+            col_lower: &self.col_lower,
+            col_upper: &self.col_upper,
+        }
+    }
+}
+
+/// A problem whose constraint matrix is an operator (never materialized).
+pub struct OpProblem<O: crate::linop::LinOp> {
+    pub name: String,
+    pub op: O,
+    pub c: Vec<f64>,
+    pub obj_offset: f64,
+    pub row_lower: Vec<f64>,
+    pub row_upper: Vec<f64>,
+    pub col_lower: Vec<f64>,
+    pub col_upper: Vec<f64>,
+}
+
+impl<O: crate::linop::LinOp> OpProblem<O> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: String,
+        op: O,
+        c: Vec<f64>,
+        obj_offset: f64,
+        row_lower: Vec<f64>,
+        row_upper: Vec<f64>,
+        col_lower: Vec<f64>,
+        col_upper: Vec<f64>,
+    ) -> Result<Self, ProblemError> {
+        let (m, n) = (op.n_rows(), op.n_cols());
+        if c.len() != n || col_lower.len() != n || col_upper.len() != n {
+            return Err(ProblemError::Dimension(format!(
+                "n={n} but c/col bounds differ"
+            )));
+        }
+        if row_lower.len() != m || row_upper.len() != m {
+            return Err(ProblemError::Dimension(format!(
+                "m={m} but row bounds differ"
+            )));
+        }
+        for i in 0..m {
+            if row_lower[i] > row_upper[i] {
+                return Err(ProblemError::BoundOrder {
+                    kind: "row",
+                    index: i,
+                    l: row_lower[i],
+                    u: row_upper[i],
+                });
+            }
+        }
+        for j in 0..n {
+            if col_lower[j] > col_upper[j] {
+                return Err(ProblemError::BoundOrder {
+                    kind: "col",
+                    index: j,
+                    l: col_lower[j],
+                    u: col_upper[j],
+                });
+            }
+        }
+        Ok(Self {
+            name,
+            op,
+            c,
+            obj_offset,
+            row_lower,
+            row_upper,
+            col_lower,
+            col_upper,
+        })
+    }
+
+    pub fn view(&self) -> LpView<'_> {
+        LpView {
+            op: &self.op,
+            c: &self.c,
+            obj_offset: self.obj_offset,
+            row_lower: &self.row_lower,
+            row_upper: &self.row_upper,
+            col_lower: &self.col_lower,
+            col_upper: &self.col_upper,
+        }
+    }
+
+    pub fn n_vars(&self) -> usize {
+        self.op.n_cols()
+    }
+    pub fn n_cons(&self) -> usize {
+        self.op.n_rows()
+    }
+}
