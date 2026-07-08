@@ -8,10 +8,28 @@ const SERIES: { key: keyof Omit<Sample, "iter">; color: string; label: string }[
 
 export class ConvergenceChart {
   private data: Sample[] = [];
+  private raf = 0;
   constructor(private canvas: HTMLCanvasElement, private tol: number) {}
 
-  push(s: Sample) { this.data.push(s); this.draw(); }
-  reset(tol: number) { this.data = []; this.tol = tol; this.draw(); }
+  push(s: Sample) {
+    this.data.push(s);
+    if (this.raf === 0) {
+      this.raf = requestAnimationFrame(() => {
+        this.raf = 0;
+        this.draw();
+      });
+    }
+  }
+
+  reset(tol: number) {
+    if (this.raf !== 0) {
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+    }
+    this.data = [];
+    this.tol = tol;
+    this.draw();
+  }
 
   private draw() {
     const ctx = this.canvas.getContext("2d")!;

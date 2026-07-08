@@ -1,2 +1,15 @@
 import { defineConfig } from "vite";
-export default defineConfig({ base: "./", server: { fs: { allow: [".."] } } });
+import { fileURLToPath, URL } from "node:url";
+
+export default defineConfig({
+  base: "./",
+  server: { fs: { allow: [".."] } },
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        bench: fileURLToPath(new URL("./bench.html", import.meta.url)),
+      },
+    },
+  },
+});

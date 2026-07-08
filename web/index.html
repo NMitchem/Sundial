@@ -3,30 +3,42 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sundial — LP on your GPU, in your browser</title>
+    <title>Sundial — 1M-variable optimal transport on your GPU</title>
     <style>
       body { font: 14px/1.5 system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
       #hud span { display: inline-block; margin-right: 1.2rem; font-variant-numeric: tabular-nums; }
-      canvas { width: 100%; height: 320px; border: 1px solid #8884; border-radius: 6px; }
+      canvas#chart { width: 100%; height: 320px; border: 1px solid #8884; border-radius: 6px; }
+      #grids { display: flex; gap: 1rem; margin: 1rem 0; }
+      #grids figure { margin: 0; text-align: center; }
+      #grids canvas { width: 192px; height: 192px; image-rendering: pixelated; border: 1px solid #8884; border-radius: 6px; }
+      #grids figcaption { font-size: 12px; color: #888; margin-top: .3rem; }
       #nogpu { color: #b00; }
       button { padding: .4rem 1rem; }
     </style>
   </head>
   <body>
     <h1>Sundial</h1>
-    <p>A linear-programming solver running as WebGPU compute shaders on <em>your</em> GPU. No server, no install.
-       Reported tolerances are re-verified on the CPU in f64 — the GPU never grades its own homework.</p>
+    <p>Optimal transport with <span id="nvars">1,048,576 variables</span>, solved live by
+       WebGPU compute shaders on <em>your</em> GPU — no server, no install, no CUDA.
+       Reported tolerances are re-verified on the CPU in f64 — the GPU never grades its
+       own homework. <a href="bench.html">Benchmark page →</a></p>
     <p id="nogpu" hidden>This browser has no WebGPU. Chrome/Edge 113+, Firefox 141+, or Safari 26+ required.</p>
     <p>
-      <select id="instance">
-        <option value="afiro">afiro (27×32)</option>
-        <option value="sc50a">sc50a</option>
-        <option value="sc50b">sc50b</option>
-        <option value="adlittle">adlittle</option>
-        <option value="share2b">share2b</option>
+      <select id="preset">
+        <option value="blobs">two blobs → two blobs</option>
+        <option value="ring">ring → square</option>
+      </select>
+      <select id="grid">
+        <option value="32" selected>32×32 grids (1,048,576 vars)</option>
+        <option value="16">16×16 grids (65,536 vars)</option>
       </select>
       <button id="solve">Solve on GPU</button>
     </p>
+    <div id="grids">
+      <figure><canvas id="src"></canvas><figcaption>source mass</figcaption></figure>
+      <figure><canvas id="arriving"></canvas><figcaption>mass arriving (live)</figcaption></figure>
+      <figure><canvas id="tgt"></canvas><figcaption>target mass</figcaption></figure>
+    </div>
     <div id="hud">
       <span id="gpu"></span><span id="iter"></span><span id="msit"></span><span id="status"></span>
     </div>
