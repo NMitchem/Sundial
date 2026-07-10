@@ -19,12 +19,10 @@ fn norm2(v: impl Iterator<Item = f64>) -> f64 {
     v.map(|a| a * a).sum::<f64>().sqrt()
 }
 
-/// ORIGINAL-space relative-residual denominators `(q_norm, c_norm)`, extracted
-/// verbatim from `residuals()` so the GPU engine can reuse the exact f64 values.
-pub fn denominators(p: &LpProblem) -> (f64, f64) {
-    denominators_view(&p.view())
-}
-
+/// Relative-residual denominators `(q_norm, c_norm)` for the given view,
+/// extracted verbatim from `residuals_view()` so the engines can reuse the
+/// exact f64 values (certificate space) and seed the primal weight
+/// (iterate space).
 pub fn denominators_view(v: &LpView) -> (f64, f64) {
     let m = v.op.n_rows();
     let q_norm = norm2((0..m).map(|i| {
