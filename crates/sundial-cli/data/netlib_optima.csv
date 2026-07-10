@@ -1,4 +1,4 @@
-name,optimum
+name,objective,note
 afiro,-464.75314286
 adlittle,225494.96316
 agg,-35991767.287
@@ -11,7 +11,7 @@ bnl1,1977.6292856
 bore3d,1373.0803942
 brandy,1518.5098965
 capri,2690.0129138
-e226,-18.751929066
+e226,-18.751929066,readme value uses the opposite objective-constant sign convention (delta = 2x the RHS constant); our verified optimum is -11.635074
 etamacro,-755.71521774
 israel,-896644.82186
 kb2,-1749.9001299

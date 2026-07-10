@@ -7,11 +7,16 @@ fn fixture_dir() -> PathBuf {
 }
 
 fn optima() -> HashMap<String, f64> {
+    // CSV: `name,objective[,note]` — the trailing note column (e.g. e226's
+    // sign-convention caveat) is ignored here; only the first two fields
+    // matter for the solved-value check.
     let csv = include_str!("../data/netlib_optima.csv");
     csv.lines()
         .skip(1)
         .map(|l| {
-            let (name, v) = l.split_once(',').unwrap();
+            let mut parts = l.splitn(3, ',');
+            let name = parts.next().unwrap();
+            let v = parts.next().unwrap();
             (name.to_string(), v.parse().unwrap())
         })
         .collect()
