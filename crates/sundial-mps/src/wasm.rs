@@ -126,6 +126,44 @@ pub async fn solve_transport(
     to_result(&sol, &ctx.adapter_name, p.n_vars())
 }
 
+/// Solve optimal transport between hand-drawn masses (hero draw mode).
+/// src/tgt are g² cell masses; junk values are cleaned and both sides
+/// normalized (see transport::problem_from_masses).
+#[wasm_bindgen(js_name = solveTransportCustom)]
+pub async fn solve_transport_custom(
+    grid: u32,
+    src: Vec<f32>,
+    tgt: Vec<f32>,
+    tol: f64,
+    on_progress: Function,
+    on_snapshot: Function,
+) -> Result<JsValue, JsValue> {
+    console_error_panic_hook::set_once();
+    let g = grid as usize;
+    let src64: Vec<f64> = src.iter().map(|&v| v as f64).collect();
+    let tgt64: Vec<f64> = tgt.iter().map(|&v| v as f64).collect();
+    let p = transport::problem_from_masses(&src64, &tgt64, g)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let ctx = GpuContext::new()
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let opts = SolveOptions {
+        tol,
+        max_iters: 500_000,
+        ..Default::default()
+    };
+    let gop = TransportGpuOp::new(&ctx.device, g * g, g * g);
+    let mut cb = progress_cb(on_progress);
+    let mut snap = |s: SnapshotEvent| {
+        let arr = js_sys::Float32Array::from(s.ax);
+        let _ = on_snapshot.call2(&JsValue::NULL, &JsValue::from_f64(s.iter as f64), &arr);
+    };
+    let sol = engine::solve_gpu_op(&ctx, &p, &gop, &opts, &mut cb, Some(&mut snap))
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    to_result(&sol, &ctx.adapter_name, p.n_vars())
+}
+
 /// Solve raw MPS bytes (plain or gzip) — the drop-a-file bench page path.
 #[wasm_bindgen(js_name = solveMpsBytes)]
 pub async fn solve_mps_bytes(

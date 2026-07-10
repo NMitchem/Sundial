@@ -1,10 +1,12 @@
-import init, { transportPreview, solveTransport } from "../../crates/sundial-mps/pkg/sundial_mps";
+import init, { transportPreview, solveTransport, solveTransportCustom } from "../../crates/sundial-mps/pkg/sundial_mps";
 import { ConvergenceChart, Sample } from "./chart";
 import { drawHeatmap } from "./heatmap";
+import { DrawState, attachBrush } from "./draw";
 
 const $ = (id: string) => document.getElementById(id)!;
 const chart = new ConvergenceChart($("chart") as HTMLCanvasElement, 1e-4);
 let wasmReady = false;
+let drawState: DrawState | null = null;
 
 if (!("gpu" in navigator)) {
   $("nogpu").hidden = false;
@@ -25,6 +27,16 @@ function params() {
   };
 }
 
+function mode(): "preset" | "draw" {
+  return ($("mode") as HTMLSelectElement).value as "preset" | "draw";
+}
+
+function repaintDraw() {
+  if (!drawState) return;
+  drawHeatmap($("src") as HTMLCanvasElement, drawState.src, drawState.g);
+  drawHeatmap($("tgt") as HTMLCanvasElement, drawState.tgt, drawState.g);
+}
+
 async function preview() {
   try {
     await ensureWasm();
@@ -38,8 +50,42 @@ async function preview() {
     console.error("preview failed:", err);
   }
 }
+
+function enterMode() {
+  const isDraw = mode() === "draw";
+  ($("preset") as HTMLSelectElement).disabled = isDraw;
+  ($("clear-src") as HTMLButtonElement).hidden = !isDraw;
+  ($("clear-tgt") as HTMLButtonElement).hidden = !isDraw;
+  if (isDraw) {
+    const { g } = params();
+    drawState = new DrawState(g);
+    repaintDraw();
+    drawHeatmap($("arriving") as HTMLCanvasElement, new Float32Array(g * g), g);
+  } else {
+    drawState = null;
+    void preview();
+  }
+}
+
 $("preset").addEventListener("change", () => void preview());
-$("grid").addEventListener("change", () => void preview());
+$("grid").addEventListener("change", () => {
+  if (mode() === "draw") {
+    enterMode();
+    return;
+  }
+  void preview();
+});
+$("mode").addEventListener("change", enterMode);
+$("clear-src").addEventListener("click", () => {
+  drawState?.clear("src");
+  repaintDraw();
+});
+$("clear-tgt").addEventListener("click", () => {
+  drawState?.clear("tgt");
+  repaintDraw();
+});
+attachBrush($("src") as HTMLCanvasElement, "src", () => drawState, repaintDraw);
+attachBrush($("tgt") as HTMLCanvasElement, "tgt", () => drawState, repaintDraw);
 void preview();
 
 $("solve").addEventListener("click", async () => {
@@ -54,27 +100,25 @@ $("solve").addEventListener("click", async () => {
     chart.reset(1e-4);
     $("status").textContent = "solving…";
     const t0 = performance.now();
-    const res = await solveTransport(
-      g,
-      preset,
-      1e-4,
-      (e: Sample & { ms_per_iter: number }) => {
-        try {
-          chart.push(e);
-          $("iter").textContent = `iter ${e.iter.toLocaleString()}`;
-          $("msit").textContent = `${e.ms_per_iter.toFixed(3)} ms/iter`;
-        } catch (err) {
-          console.error("progress callback failed:", err);
-        }
-      },
-      (_iter: number, ax: Float32Array) => {
-        try {
-          drawHeatmap($("arriving") as HTMLCanvasElement, ax.subarray(ns), g);
-        } catch (err) {
-          console.error("snapshot callback failed:", err);
-        }
-      },
-    );
+    const progressCb = (e: Sample & { ms_per_iter: number }) => {
+      try {
+        chart.push(e);
+        $("iter").textContent = `iter ${e.iter.toLocaleString()}`;
+        $("msit").textContent = `${e.ms_per_iter.toFixed(3)} ms/iter`;
+      } catch (err) {
+        console.error("progress callback failed:", err);
+      }
+    };
+    const snapshotCb = (_iter: number, ax: Float32Array) => {
+      try {
+        drawHeatmap($("arriving") as HTMLCanvasElement, ax.subarray(ns), g);
+      } catch (err) {
+        console.error("snapshot callback failed:", err);
+      }
+    };
+    const res = mode() === "draw" && drawState
+      ? await solveTransportCustom(g, drawState.src, drawState.tgt, 1e-4, progressCb, snapshotCb)
+      : await solveTransport(g, preset, 1e-4, progressCb, snapshotCb);
     $("gpu").textContent = res.adapter;
     $("status").textContent = res.status;
     $("result").textContent =

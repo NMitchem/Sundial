@@ -165,10 +165,23 @@ fn custom_solve_matches_preset_solve() {
     use sundial_core::problem::{SolveOptions, SolveStatus};
     let (src, tgt) = transport::masses(transport::Preset::Blobs, 4);
     let p = transport::problem_from_masses(&src, &tgt, 4).unwrap();
-    let opts = SolveOptions { tol: 1e-4, max_iters: 500_000, ..Default::default() };
+    let opts = SolveOptions {
+        tol: 1e-4,
+        max_iters: 500_000,
+        ..Default::default()
+    };
     let custom = sundial_core::reference::solve_op(&p, &opts, &mut |_| {});
-    let preset = sundial_core::reference::solve_op(&transport::problem(transport::Preset::Blobs, 4), &opts, &mut |_| {});
+    let preset = sundial_core::reference::solve_op(
+        &transport::problem(transport::Preset::Blobs, 4),
+        &opts,
+        &mut |_| {},
+    );
     assert_eq!(custom.status, SolveStatus::Optimal);
     let rel = (custom.primal_obj - preset.primal_obj).abs() / (1.0 + preset.primal_obj.abs());
-    assert!(rel <= 1e-6, "custom {} vs preset {}", custom.primal_obj, preset.primal_obj);
+    assert!(
+        rel <= 1e-6,
+        "custom {} vs preset {}",
+        custom.primal_obj,
+        preset.primal_obj
+    );
 }
