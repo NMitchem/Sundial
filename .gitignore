@@ -6,3 +6,5 @@ crates/sundial-mps/pkg
 bench/
 /results.csv
 /report.md
+/results-*.csv
+/hero-*.json
