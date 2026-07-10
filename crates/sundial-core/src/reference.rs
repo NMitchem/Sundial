@@ -112,6 +112,14 @@ pub fn solve_view(
     let mut mu_last_restart = f64::INFINITY;
     let mut iters_since_restart: u64 = 0;
     let mut restarts: u32 = 0;
+    // Divergence-detection state (see farkas.rs constants): candidate norms
+    // and residuals at the LAST restart, plus growth streak counters.
+    let mut y_norm_prev = 0.0f64;
+    let mut x_norm_prev = 0.0f64;
+    let mut relp_prev = f64::INFINITY;
+    let mut reld_prev = f64::INFINITY;
+    let mut infeas_streak: u32 = 0;
+    let mut unbound_streak: u32 = 0;
     let mut status = SolveStatus::IterationLimit;
     let mut iter: u64 = 0;
     let mut last_check_time = Instant::now();
@@ -201,6 +209,44 @@ pub fn solve_view(
                     );
                     tau = 0.9 / (norm_a * omega);
                     sigma = 0.9 * omega / norm_a;
+                }
+                // ---- divergence detection (restart cadence only) ----
+                let r_cand = if cand_is_avg { &r_avg } else { &r_cur };
+                let x_u = unscale(scaling, &st.x, true);
+                let y_u = unscale(scaling, &st.y, false);
+                let y_norm = y_u.iter().fold(0.0f64, |a, &v| a.max(v.abs()));
+                let x_norm = x_u.iter().fold(0.0f64, |a, &v| a.max(v.abs()));
+                if y_norm >= crate::farkas::GROWTH * y_norm_prev
+                    && r_cand.rel_primal > crate::farkas::STALL * relp_prev
+                {
+                    infeas_streak += 1;
+                } else {
+                    infeas_streak = 0;
+                }
+                if x_norm >= crate::farkas::GROWTH * x_norm_prev
+                    && r_cand.rel_dual > crate::farkas::STALL * reld_prev
+                {
+                    unbound_streak += 1;
+                } else {
+                    unbound_streak = 0;
+                }
+                y_norm_prev = y_norm;
+                x_norm_prev = x_norm;
+                relp_prev = r_cand.rel_primal;
+                reld_prev = r_cand.rel_dual;
+                if infeas_streak >= crate::farkas::STREAK_K {
+                    if crate::farkas::verify_infeasible(original, &y_u).is_some() {
+                        status = SolveStatus::Infeasible;
+                        break;
+                    }
+                    infeas_streak = 0; // failed verification: don't re-hammer
+                }
+                if unbound_streak >= crate::farkas::STREAK_K {
+                    if crate::farkas::verify_unbounded(original, &x_u).is_some() {
+                        status = SolveStatus::Unbounded;
+                        break;
+                    }
+                    unbound_streak = 0;
                 }
                 mu_last_restart = mu_cand;
                 iters_since_restart = 0;

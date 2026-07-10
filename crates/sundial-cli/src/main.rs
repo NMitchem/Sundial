@@ -166,8 +166,15 @@ fn main() -> Result<()> {
                     sol.stats.solve_ms, sol.stats.verified.mu()
                 );
             }
-            if sol.status != sundial_core::problem::SolveStatus::Optimal {
-                bail!("not solved to tolerance");
+            match sol.status {
+                sundial_core::problem::SolveStatus::Optimal => {}
+                sundial_core::problem::SolveStatus::Infeasible => {
+                    bail!("infeasible (Farkas ray certified in f64)")
+                }
+                sundial_core::problem::SolveStatus::Unbounded => {
+                    bail!("unbounded (improving ray certified in f64)")
+                }
+                _ => bail!("not solved to tolerance"),
             }
         }
         Cmd::Bench {
@@ -301,8 +308,15 @@ fn main() -> Result<()> {
                     sol.stats.solve_ms, sol.stats.verified.mu()
                 );
             }
-            if sol.status != sundial_core::problem::SolveStatus::Optimal {
-                bail!("not solved to tolerance");
+            match sol.status {
+                sundial_core::problem::SolveStatus::Optimal => {}
+                sundial_core::problem::SolveStatus::Infeasible => {
+                    bail!("infeasible (Farkas ray certified in f64)")
+                }
+                sundial_core::problem::SolveStatus::Unbounded => {
+                    bail!("unbounded (improving ray certified in f64)")
+                }
+                _ => bail!("not solved to tolerance"),
             }
         }
     }

@@ -156,6 +156,11 @@ pub enum SolveStatus {
     IterationLimit,
     TimeLimit,
     NumericalBreakdown,
+    /// CPU-f64-certified Farkas ray exists: no feasible point. Never set
+    /// from the heuristic alone — see `farkas::verify_infeasible`.
+    Infeasible,
+    /// CPU-f64-certified improving recession ray: objective unbounded below.
+    Unbounded,
 }
 
 #[derive(Debug, Clone)]

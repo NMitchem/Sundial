@@ -1,3 +1,4 @@
+pub mod farkas;
 pub mod gpu;
 pub mod kkt;
 pub mod linop;
