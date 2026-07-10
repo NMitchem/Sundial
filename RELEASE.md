@@ -78,7 +78,7 @@ you.
   web app imports the generated `pkg`. Build in this order (wasm first, then the
   web bundle):
   ```bash
-  wasm-pack build crates/sundial-web --target web    # regenerates crates/sundial-web/pkg (gitignored)
+  bash scripts/build_npm.sh                          # release wasm build into crates/sundial-web/pkg (gitignored)
   cd web && npm ci && npm run build                  # emits web/dist (index.html + bench.html + assets)
   cd ..
   ```
@@ -93,7 +93,7 @@ you.
     (`/sundial/`) set `base: '/sundial/'` in `web/vite.config.*` (or deploy to a
     user/org root or a custom domain and skip this).
 - [ ] **Option B — Netlify/Vercel.** Point it at the repo with build command
-  `wasm-pack build crates/sundial-web --target web && cd web && npm ci && npm run build`
+  `bash scripts/build_npm.sh && cd web && npm ci && npm run build`
   and publish directory `web/dist`. Gives you a clean apex/custom domain.
 - [ ] Open the deployed URL on a real machine and confirm end-to-end **before
   posting**: 32×32 reaches `Optimal (CPU f64 verified)`, the arriving-mass panel
@@ -118,10 +118,14 @@ you.
 - [ ] `npm login` (you'll need an npm account with publish rights).
 - [ ] Build the publishable package and publish from the generated `pkg`:
   ```bash
-  wasm-pack build crates/sundial-web --target web    # or --target bundler for bundler consumers
+  bash scripts/build_npm.sh                          # release wasm build, then copies types-extra.d.ts and
+                                                      # adds it + both LICENSE files to package.json's "files"
+                                                      # allowlist — publishing via a bare `wasm-pack build` skips
+                                                      # this step and ships a tarball missing the .d.ts and both
+                                                      # LICENSE files; check the "== pack dry run" output it prints
+                                                      # for the .wasm + .js + .d.ts + LICENSE-* file list
   cd crates/sundial-web/pkg
-  # confirm package.json: name (sundial-lp or fallback), version, license,
-  # repository URL, and that the files list includes the .wasm + .js + .d.ts
+  # confirm package.json: name (sundial-lp or fallback), version, license, repository URL
   npm publish --access public                        # --access public is required for a @scoped fallback
   cd ../../..
   ```
