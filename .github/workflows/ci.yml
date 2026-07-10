@@ -11,3 +11,4 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build -p sundial-mps --target wasm32-unknown-unknown
+      - run: cargo clippy -p sundial-mps --target wasm32-unknown-unknown -- -D warnings
