@@ -15,5 +15,8 @@ futures-channel.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster.workspace = true
 
+[dev-dependencies]
+sundial-mps = { path = "../sundial-mps" }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 serde.workspace = true

@@ -317,6 +317,16 @@ async fn solve_core(
     let mut status = SolveStatus::IterationLimit;
     let mut last_check_time = Instant::now();
     let mut last_check_iter: u64 = 0;
+    // Divergence detection (constants in farkas.rs). GPU uses the CURRENT
+    // iterate's norms (slots 0/11) with the CANDIDATE's residuals — a benign
+    // asymmetry vs the CPU reference (candidate norms): both diverge along
+    // the same ray, and verification is the only gate that matters.
+    let mut y_norm_prev = 0.0f64;
+    let mut x_norm_prev = 0.0f64;
+    let mut relp_prev = f64::INFINITY;
+    let mut reld_prev = f64::INFINITY;
+    let mut infeas_streak: u32 = 0;
+    let mut unbound_streak: u32 = 0;
 
     'outer: while iter < opts.max_iters {
         // one submit = check_every iterations
@@ -376,6 +386,7 @@ async fn solve_core(
             }
         }
         red.record_maxabs(dev, &mut enc, &k, x_cur, n, &results, 0);
+        red.record_maxabs(dev, &mut enc, &k, y_cur, m, &results, 11);
         record_eval(
             dev, &mut enc, &k, &red, gpu_op, &u_n, &u_m, &bufs, x_cur, y_cur, n, m, &results, 1,
         );
@@ -388,7 +399,7 @@ async fn solve_core(
             dev, &mut enc, &k, &red, gpu_op, &u_n, &u_m, &bufs, &xa, &ya, n, m, &results, 6,
         );
         ctx.queue.submit([enc.finish()]);
-        let want = if has_snapshot { 16 + m } else { 11 };
+        let want = if has_snapshot { 16 + m } else { 12 };
         let vals = buffers::readback_f32(dev, &ctx.queue, &results, want).await;
 
         // NaN/overflow watchdog (evaluations for a broken iterate are unused)
@@ -492,6 +503,71 @@ async fn solve_core(
                     }
                     .bytes(),
                 );
+            }
+            // ---- divergence detection (restart cadence only) ----
+            let x_norm = vals[0] as f64;
+            let y_norm = vals[11] as f64;
+            if y_norm >= crate::farkas::GROWTH * y_norm_prev
+                && e_cand.rel_p > crate::farkas::STALL * relp_prev
+            {
+                infeas_streak += 1;
+            } else {
+                infeas_streak = 0;
+            }
+            if x_norm >= crate::farkas::GROWTH * x_norm_prev
+                && e_cand.rel_d > crate::farkas::STALL * reld_prev
+            {
+                unbound_streak += 1;
+            } else {
+                unbound_streak = 0;
+            }
+            y_norm_prev = y_norm;
+            x_norm_prev = x_norm;
+            relp_prev = e_cand.rel_p;
+            reld_prev = e_cand.rel_d;
+            if infeas_streak >= crate::farkas::STREAK_K || unbound_streak >= crate::farkas::STREAK_K
+            {
+                // candidate readback → unscale → f64 verification (the gate)
+                let xs = buffers::readback_f32(dev, &ctx.queue, cand_x, n).await;
+                let ys = buffers::readback_f32(dev, &ctx.queue, cand_y, m).await;
+                let xs64: Vec<f64> = xs.iter().map(|&v| v as f64).collect();
+                let ys64: Vec<f64> = ys.iter().map(|&v| v as f64).collect();
+                let xo = s.unscale_x(&xs64);
+                let yo = s.unscale_y(&ys64);
+                if infeas_streak >= crate::farkas::STREAK_K {
+                    if crate::farkas::verify_infeasible(orig, &yo).is_some() {
+                        let mut yp = yo.clone();
+                        project_dual(orig.row_lower, orig.row_upper, &mut yp);
+                        let verified = kkt::residuals_view(orig, &xo, &yp);
+                        return Ok(finish(
+                            xo,
+                            yp,
+                            verified,
+                            SolveStatus::Infeasible,
+                            iter,
+                            restarts,
+                            start,
+                        ));
+                    }
+                    infeas_streak = 0; // failed verification: don't re-hammer
+                }
+                if unbound_streak >= crate::farkas::STREAK_K {
+                    if crate::farkas::verify_unbounded(orig, &xo).is_some() {
+                        let mut yp = yo.clone();
+                        project_dual(orig.row_lower, orig.row_upper, &mut yp);
+                        let verified = kkt::residuals_view(orig, &xo, &yp);
+                        return Ok(finish(
+                            xo,
+                            yp,
+                            verified,
+                            SolveStatus::Unbounded,
+                            iter,
+                            restarts,
+                            start,
+                        ));
+                    }
+                    unbound_streak = 0;
+                }
             }
             count = 1;
             mu_last_restart = e_cand.mu;
