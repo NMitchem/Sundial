@@ -129,3 +129,46 @@ fn identical_marginals_cost_zero() {
     assert_eq!(sol.status, SolveStatus::Optimal);
     assert!(sol.primal_obj.abs() <= 1e-3, "obj {}", sol.primal_obj);
 }
+
+#[test]
+fn custom_masses_build_normalized_problems() {
+    let g = 4usize;
+    let mut src = vec![0.0f64; 16];
+    src[5] = 3.0; // single hot cell
+    let mut tgt = vec![0.0f64; 16];
+    tgt[10] = 7.0;
+    tgt[3] = f64::NAN; // junk in ⇒ floored, never poisoning
+    let p = transport::problem_from_masses(&src, &tgt, g).unwrap();
+    let (rl, ru) = (&p.row_lower, &p.row_upper);
+    assert_eq!(rl, ru);
+    let s_src: f64 = rl[..16].iter().sum();
+    let s_tgt: f64 = rl[16..].iter().sum();
+    assert!((s_src - 1.0).abs() < 1e-12 && (s_tgt - 1.0).abs() < 1e-12);
+    assert!(rl.iter().all(|&v| v > 0.0 && v.is_finite()));
+}
+
+#[test]
+fn all_zero_masses_become_uniform() {
+    let p = transport::problem_from_masses(&[0.0; 16], &[0.0; 16], 4).unwrap();
+    let first = p.row_lower[0];
+    assert!(p.row_lower[..16].iter().all(|&v| (v - first).abs() < 1e-15));
+    assert!((first - 1.0 / 16.0).abs() < 1e-12);
+}
+
+#[test]
+fn wrong_length_masses_error() {
+    assert!(transport::problem_from_masses(&[1.0; 15], &[1.0; 16], 4).is_err());
+}
+
+#[test]
+fn custom_solve_matches_preset_solve() {
+    use sundial_core::problem::{SolveOptions, SolveStatus};
+    let (src, tgt) = transport::masses(transport::Preset::Blobs, 4);
+    let p = transport::problem_from_masses(&src, &tgt, 4).unwrap();
+    let opts = SolveOptions { tol: 1e-4, max_iters: 500_000, ..Default::default() };
+    let custom = sundial_core::reference::solve_op(&p, &opts, &mut |_| {});
+    let preset = sundial_core::reference::solve_op(&transport::problem(transport::Preset::Blobs, 4), &opts, &mut |_| {});
+    assert_eq!(custom.status, SolveStatus::Optimal);
+    let rel = (custom.primal_obj - preset.primal_obj).abs() / (1.0 + preset.primal_obj.abs());
+    assert!(rel <= 1e-6, "custom {} vs preset {}", custom.primal_obj, preset.primal_obj);
+}

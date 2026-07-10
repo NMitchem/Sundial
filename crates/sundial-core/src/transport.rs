@@ -3,7 +3,7 @@
 //! cost VECTOR is materialized (in-shader cost is M2 — adjudication in the
 //! M1 plan). Cells: idx = row*g + col, center ((col+0.5)/g, (row+0.5)/g).
 use crate::linop::LinOp;
-use crate::problem::{CsrMatrix, LpProblem, OpProblem};
+use crate::problem::{CsrMatrix, LpProblem, OpProblem, ProblemError};
 
 pub struct TransportOp {
     pub ns: usize,
@@ -185,6 +185,47 @@ pub fn problem(preset: Preset, g: usize) -> OpProblem<TransportOp> {
         vec![f64::INFINITY; ns * ns],
     )
     .expect("transport problem is valid by construction")
+}
+
+/// Build a transport problem from user-supplied (e.g. hand-drawn) masses.
+/// Junk in, feasibility out: non-finite/negative entries are zeroed, every
+/// cell is floored at 1e-9, and each side is normalized to sum exactly 1 —
+/// the same pipeline presets go through, so custom problems are feasible by
+/// construction. An all-zero canvas becomes the uniform distribution.
+pub fn problem_from_masses(
+    src: &[f64],
+    tgt: &[f64],
+    g: usize,
+) -> Result<OpProblem<TransportOp>, ProblemError> {
+    let ns = g * g;
+    if src.len() != ns || tgt.len() != ns {
+        return Err(ProblemError::Dimension(format!(
+            "masses must have g²={ns} cells, got {} and {}",
+            src.len(),
+            tgt.len()
+        )));
+    }
+    let clean = |v: &[f64]| -> Vec<f64> {
+        let mut out: Vec<f64> = v
+            .iter()
+            .map(|&x| if x.is_finite() && x > 0.0 { x } else { 0.0 }.max(1e-9))
+            .collect();
+        let sum: f64 = out.iter().sum();
+        out.iter_mut().for_each(|x| *x /= sum);
+        out
+    };
+    let mut row = clean(src);
+    row.extend_from_slice(&clean(tgt));
+    OpProblem::new(
+        format!("transport-custom-{g}x{g}"),
+        TransportOp { ns, nt: ns },
+        cost_vector(g),
+        0.0,
+        row.clone(),
+        row,
+        vec![0.0; ns * ns],
+        vec![f64::INFINITY; ns * ns],
+    )
 }
 
 /// Explicit CSR twin of `TransportOp` — TEST ORACLE ONLY (dense in memory
