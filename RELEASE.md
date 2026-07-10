@@ -155,7 +155,7 @@ you.
   headline). Options, best first:
   1. **Show HN: I solved a 1,048,576-variable optimization problem in a browser tab, on any GPU**
   2. Show HN: A GPU optimization solver in WebGPU — no CUDA, no install, no server
-  3. Show HN: Sundial — a linear-programming solver that runs as WebGPU compute shaders
+  3. Show HN: Sundial — watch a million-variable optimization problem solve on your own GPU
 - [ ] First comment (post it yourself, immediately): the honest framing that
   makes the project credible to a skeptical audience — f32 GPU iterates but
   every "Optimal" is re-verified in f64 on the CPU (the GPU never grades its own

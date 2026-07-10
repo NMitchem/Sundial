@@ -84,6 +84,15 @@ constant can only ever change *when* we attempt verification, never *whether* a
 wrong answer slips through. On constructed infeasible/unbounded oracles the
 certificate fires at about 12.4k iterations.
 
+In the field, the detector is deliberately conservative, and the honest
+recall number reflects that. On Netlib's real infeasible set, **2 of 6
+instances certify Infeasible** (itest2 and galenet); the other **4 stop at an
+honest `IterationLimit`**, and — the number that actually matters — **zero
+produced a false `Optimal`**. That trade is on purpose: a missed detection
+costs you some iterations, a false claim would cost you trust, and the whole
+architecture is built so the false-claim direction is structurally impossible.
+We'd rather report "I couldn't decide" than "solved" when we can't prove it.
+
 ## 4. The war story: the million-variable gate that stalled at half a million iterations
 
 The 1M-variable transport problem did not work the first time, and the way it
@@ -178,9 +187,10 @@ the published Netlib optima. The current split on 32 instances:
 **20 of 32 reach Optimal** at CPU-f64-verified 1e-4; the other **12 stop at
 `IterationLimit`**, and there are **no parse failures** (down from one in M1 —
 see `blend.mps` below). Among the 20 Optimal rows, the worst relative objective
-error against the readme is e226's 3.6e-1 — which is the sign-convention
-footnote below, not a real error; every other Optimal instance matches the
-published optimum to better than 1e-3 (worst real case: adlittle, 6.7e-4). This
+error (reported as |obj − known| / (1 + |known|)) against the readme is e226's
+3.6e-1 — which is the sign-convention footnote below, not a real error; every
+other Optimal instance matches the published optimum to better than 1e-3 (worst
+real case: adlittle, 6.7e-4). This
 is up from M1's 19/32 Optimal: the one instance that changed is `blend.mps`,
 which went from an unreadable parse error to a verified solve.
 
