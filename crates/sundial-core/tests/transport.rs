@@ -41,16 +41,31 @@ fn exact_norm_matches_power_iteration() {
 }
 
 #[test]
-fn masses_are_normalized_and_positive() {
-    for preset in [Preset::Blobs, Preset::Ring] {
+fn all_presets_normalized_and_positive() {
+    use sundial_core::transport::Preset::*;
+    for preset in [Blobs, Ring, Spiral, Checker, Corners] {
         let (src, tgt) = transport::masses(preset, 16);
-        assert_eq!(src.len(), 256);
-        assert_eq!(tgt.len(), 256);
-        assert!((src.iter().sum::<f64>() - 1.0).abs() < 1e-12);
-        assert!((tgt.iter().sum::<f64>() - 1.0).abs() < 1e-12);
-        assert!(src.iter().all(|&v| v > 0.0));
-        assert!(tgt.iter().all(|&v| v > 0.0));
+        for (side, v) in [("src", &src), ("tgt", &tgt)] {
+            assert_eq!(v.len(), 256, "{preset:?} {side}");
+            assert!(
+                (v.iter().sum::<f64>() - 1.0).abs() < 1e-12,
+                "{preset:?} {side}"
+            );
+            assert!(v.iter().all(|&x| x > 0.0), "{preset:?} {side}");
+        }
     }
+}
+
+#[test]
+fn new_preset_names_parse() {
+    for (s, want) in [
+        ("spiral", transport::Preset::Spiral),
+        ("checker", transport::Preset::Checker),
+        ("corners", transport::Preset::Corners),
+    ] {
+        assert_eq!(s.parse::<transport::Preset>().unwrap(), want);
+    }
+    assert!("nope".parse::<transport::Preset>().is_err());
 }
 
 #[test]

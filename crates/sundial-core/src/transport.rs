@@ -44,6 +44,9 @@ impl LinOp for TransportOp {
 pub enum Preset {
     Blobs,
     Ring,
+    Spiral,
+    Checker,
+    Corners,
 }
 
 impl std::str::FromStr for Preset {
@@ -52,7 +55,12 @@ impl std::str::FromStr for Preset {
         match s {
             "blobs" => Ok(Preset::Blobs),
             "ring" => Ok(Preset::Ring),
-            other => Err(format!("unknown preset '{other}' (blobs|ring)")),
+            "spiral" => Ok(Preset::Spiral),
+            "checker" => Ok(Preset::Checker),
+            "corners" => Ok(Preset::Corners),
+            other => Err(format!(
+                "unknown preset '{other}' (blobs|ring|spiral|checker|corners)"
+            )),
         }
     }
 }
@@ -76,6 +84,53 @@ fn density(preset: Preset, source: bool, px: f64, py: f64) -> f64 {
                 0.0
             }
         }
+        (Preset::Spiral, true) => {
+            // distance to a sampled Archimedean spiral around the center
+            let mut d2min = f64::INFINITY;
+            for t in 0..=255 {
+                let s = t as f64 / 255.0;
+                let theta = 4.0 * std::f64::consts::PI * s;
+                let r = 0.08 + 0.30 * s;
+                let (sx, sy) = (0.5 + r * theta.cos(), 0.5 + r * theta.sin());
+                let d2 = (px - sx).powi(2) + (py - sy).powi(2);
+                if d2 < d2min {
+                    d2min = d2;
+                }
+            }
+            (-d2min / (2.0 * 0.03 * 0.03)).exp()
+        }
+        (Preset::Spiral, false) => {
+            // filled disk, radius 0.32
+            let r = ((px - 0.5).powi(2) + (py - 0.5).powi(2)).sqrt();
+            if r <= 0.32 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        (Preset::Checker, true) => {
+            // 4×4 checkerboard, "black" squares carry the mass
+            if ((px * 4.0).floor() as i64 + (py * 4.0).floor() as i64) % 2 == 0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        (Preset::Checker, false) => {
+            // the inverted board
+            if ((px * 4.0).floor() as i64 + (py * 4.0).floor() as i64) % 2 == 0 {
+                0.0
+            } else {
+                1.0
+            }
+        }
+        (Preset::Corners, true) => {
+            gauss(px, py, 0.15, 0.15, 0.07)
+                + gauss(px, py, 0.85, 0.15, 0.07)
+                + gauss(px, py, 0.15, 0.85, 0.07)
+                + gauss(px, py, 0.85, 0.85, 0.07)
+        }
+        (Preset::Corners, false) => gauss(px, py, 0.5, 0.5, 0.12),
     }
 }
 
