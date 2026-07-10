@@ -3,9 +3,6 @@ use std::io::Read;
 use sundial_core::problem::{CsrMatrix, LpProblem};
 use thiserror::Error;
 
-#[cfg(target_arch = "wasm32")]
-pub mod wasm;
-
 #[derive(Debug, Error)]
 pub enum MpsError {
     #[error("line {line}: {msg}")]

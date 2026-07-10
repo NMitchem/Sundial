@@ -1,4 +1,4 @@
-import init, { transportPreview, solveTransport, solveTransportCustom } from "../../crates/sundial-mps/pkg/sundial_mps";
+import init, { transportPreview, solveTransport, solveTransportCustom } from "../../crates/sundial-web/pkg/sundial_lp";
 import { ConvergenceChart, Sample } from "./chart";
 import { drawHeatmap } from "./heatmap";
 import { DrawState, attachBrush } from "./draw";

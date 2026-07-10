@@ -1,0 +1,20 @@
+[package]
+name = "sundial-lp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GPU linear-programming solver (restarted PDHG) running as WebGPU compute shaders — in the browser, no CUDA, no server. Every Optimal is CPU-f64-verified."
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+sundial-core.workspace = true
+sundial-mps.workspace = true
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+serde.workspace = true
+console_error_panic_hook = "0.1"

@@ -2,9 +2,10 @@
 web/node_modules
 web/dist
 crates/sundial-core/pkg
-crates/sundial-mps/pkg
+crates/sundial-web/pkg
 bench/
 /results.csv
 /report.md
 /results-*.csv
 /hero-*.json
+*.tgz

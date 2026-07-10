@@ -998,18 +998,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "sundial-mps"
+name = "sundial-lp"
 version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
- "flate2",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
  "sundial-core",
- "thiserror",
+ "sundial-mps",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "sundial-mps"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "sundial-core",
+ "thiserror",
 ]
 
 [[package]]

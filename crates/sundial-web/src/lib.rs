@@ -1,3 +1,8 @@
+#![cfg(target_arch = "wasm32")]
+//! sundial-lp: the wasm bindings for the Sundial GPU LP/optimal-transport
+//! solver. Wasm-only by construction (empty crate on native targets) — see
+//! sundial-core/sundial-mps for the portable engine and parser.
+
 use js_sys::Function;
 use serde::Serialize;
 use sundial_core::gpu::op::TransportGpuOp;
@@ -46,6 +51,17 @@ fn progress_cb(on_progress: Function) -> impl FnMut(ProgressEvent) {
     }
 }
 
+/// Capability probe: true when `navigator.gpu` exists. No device is
+/// requested — callers can gate UI before committing to GPU init.
+#[wasm_bindgen(js_name = webgpuAvailable)]
+pub fn webgpu_available() -> bool {
+    js_sys::Reflect::get(&js_sys::global(), &"navigator".into())
+        .ok()
+        .and_then(|nav| js_sys::Reflect::get(&nav, &"gpu".into()).ok())
+        .map(|gpu| !gpu.is_undefined() && !gpu.is_null())
+        .unwrap_or(false)
+}
+
 /// Solve an MPS model on the browser's GPU. onProgress receives
 /// {iter, rel_primal, rel_dual, rel_gap, ms_per_iter} every check interval.
 #[wasm_bindgen(js_name = solveMps)]
@@ -55,7 +71,7 @@ pub async fn solve_mps(
     on_progress: Function,
 ) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();
-    let p = crate::parse_str(&mps_text).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let p = sundial_mps::parse_str(&mps_text).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let ctx = GpuContext::new()
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -172,7 +188,7 @@ pub async fn solve_mps_bytes(
     on_progress: Function,
 ) -> Result<JsValue, JsValue> {
     console_error_panic_hook::set_once();
-    let p = crate::parse_bytes(&bytes).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let p = sundial_mps::parse_bytes(&bytes).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let ctx = GpuContext::new()
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;

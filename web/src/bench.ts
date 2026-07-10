@@ -1,4 +1,4 @@
-import init, { solveMps, solveMpsBytes } from "../../crates/sundial-mps/pkg/sundial_mps";
+import init, { solveMps, solveMpsBytes } from "../../crates/sundial-web/pkg/sundial_lp";
 import { ConvergenceChart, Sample } from "./chart";
 
 const $ = (id: string) => document.getElementById(id)!;
