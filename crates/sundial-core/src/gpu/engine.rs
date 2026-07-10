@@ -39,7 +39,7 @@ pub async fn solve_gpu(
     }
 
     let norm_a = reference::power_iteration_norm(&sp.a, &sp.at, 100, opts.seed);
-    let gop = op::CsrGpuOp::new(&ctx.device, &sp.a, &sp.at);
+    let gop = op::CsrGpuOp::new_with_precision(&ctx.device, &sp.a, &sp.at, opts.df64);
     solve_core(
         ctx,
         &sp.view(),
@@ -125,7 +125,7 @@ async fn solve_core(
     let (q_norm, c_norm) = kkt::denominators_view(orig); // ORIGINAL-space denominators, f64
     let dev = &ctx.device;
     let k = Kernels::new(dev);
-    let red = Reducer::new(dev, n.max(m));
+    let red = Reducer::new_with_precision(dev, n.max(m), opts.df64);
     // results[0]=maxabs, [1..=5]=cur eval, [6..=10]=avg eval, [11..16] spare,
     // [16..16+m]=ORIGINAL-space A·x_cur snapshot (written only when requested).
     let results = buffers::storage_zeros_f32(dev, 16 + m, "results");

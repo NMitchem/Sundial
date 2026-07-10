@@ -187,6 +187,10 @@ pub struct SolveOptions {
     pub time_limit_ms: Option<f64>,
     pub check_every: u32,
     pub seed: u64,
+    /// Opt-in double-double (two-f32) accumulation for the accumulation-critical
+    /// GPU kernels (M2 experiment). Default false: pipeline selection and results
+    /// are byte-identical to the plain-f32 path.
+    pub df64: bool,
 }
 
 impl Default for SolveOptions {
@@ -197,6 +201,7 @@ impl Default for SolveOptions {
             time_limit_ms: None,
             check_every: 64,
             seed: 0,
+            df64: false,
         }
     }
 }

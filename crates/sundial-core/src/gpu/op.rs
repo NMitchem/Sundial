@@ -37,12 +37,22 @@ pub struct CsrGpuOp {
     at_indptr: wgpu::Buffer,
     at_indices: wgpu::Buffer,
     at_vals: wgpu::Buffer,
-    u_m: wgpu::Buffer, // spmv params for m-row dispatch (A)
-    u_n: wgpu::Buffer, // spmv params for n-row dispatch (Aᵀ)
+    u_m: wgpu::Buffer,        // spmv params for m-row dispatch (A)
+    u_n: wgpu::Buffer,        // spmv params for n-row dispatch (Aᵀ)
+    spmv_entry: &'static str, // "spmv" (f32) or "spmv_df64" — same bindings
 }
 
 impl CsrGpuOp {
     pub fn new(dev: &wgpu::Device, a: &CsrMatrix, at: &CsrMatrix) -> Self {
+        Self::new_with_precision(dev, a, at, false)
+    }
+
+    pub fn new_with_precision(
+        dev: &wgpu::Device,
+        a: &CsrMatrix,
+        at: &CsrMatrix,
+        df64: bool,
+    ) -> Self {
         assert_eq!(a.n_rows, at.n_cols);
         assert_eq!(a.n_cols, at.n_rows);
         let f32v = |v: &[f64]| -> Vec<f32> { v.iter().map(|&x| x as f32).collect() };
@@ -71,6 +81,7 @@ impl CsrGpuOp {
             at_vals: buffers::storage_f32(dev, &f32v(&at.values), "at_vals"),
             u_m: u(a.n_rows, "csr_u_m"),
             u_n: u(a.n_cols, "csr_u_n"),
+            spmv_entry: if df64 { "spmv_df64" } else { "spmv" },
         }
     }
 }
@@ -90,7 +101,7 @@ impl GpuOp for CsrGpuOp {
         x: &wgpu::Buffer,
         out: &wgpu::Buffer,
     ) {
-        let pl = k.pipeline("spmv");
+        let pl = k.pipeline(self.spmv_entry);
         let bg = kernels::bind(
             dev,
             pl,
@@ -113,7 +124,7 @@ impl GpuOp for CsrGpuOp {
         y: &wgpu::Buffer,
         out: &wgpu::Buffer,
     ) {
-        let pl = k.pipeline("spmv");
+        let pl = k.pipeline(self.spmv_entry);
         let bg = kernels::bind(
             dev,
             pl,
@@ -146,10 +157,17 @@ pub struct TransportGpuOp {
     nt: usize,
     u_apply: wgpu::Buffer,   // stride sized for the m-row dispatch
     u_apply_t: wgpu::Buffer, // stride sized for the n-element dispatch
+    // A·x entry: "ot_apply" (f32, bindings 0/1/6) or "ot_apply_df64"
+    // (df64 row accumulators, bindings 3/4/7). Aᵀ·y is always f32 ot_apply_t.
+    ot_entry: &'static str,
 }
 
 impl TransportGpuOp {
     pub fn new(dev: &wgpu::Device, ns: usize, nt: usize) -> Self {
+        Self::new_with_precision(dev, ns, nt, false)
+    }
+
+    pub fn new_with_precision(dev: &wgpu::Device, ns: usize, nt: usize, df64: bool) -> Self {
         let (m, n) = (ns + nt, ns * nt);
         Self {
             ns,
@@ -164,6 +182,7 @@ impl TransportGpuOp {
                 &tparams_bytes(ns as u32, nt as u32, n as u32, wgs(n) * WG),
                 "ot_u_apply_t",
             ),
+            ot_entry: if df64 { "ot_apply_df64" } else { "ot_apply" },
         }
     }
 }
@@ -183,8 +202,14 @@ impl GpuOp for TransportGpuOp {
         x: &wgpu::Buffer,
         out: &wgpu::Buffer,
     ) {
-        let pl = k.pipeline("ot_apply");
-        let bg = kernels::bind(dev, pl, &[(0, &self.u_apply), (1, x), (6, out)]);
+        let pl = k.pipeline(self.ot_entry);
+        // df64's ot_apply_df64 binds its own slots (3/4/7) to stay clear of the
+        // shared Params block; the f32 ot_apply uses 0/1/6. Same TParams bytes.
+        let bg = if self.ot_entry == "ot_apply_df64" {
+            kernels::bind(dev, pl, &[(3, &self.u_apply), (4, x), (7, out)])
+        } else {
+            kernels::bind(dev, pl, &[(0, &self.u_apply), (1, x), (6, out)])
+        };
         pass_dispatch(enc, pl, &bg, wgs(self.ns + self.nt));
     }
     fn record_apply_t(

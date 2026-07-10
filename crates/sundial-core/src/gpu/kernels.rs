@@ -41,6 +41,10 @@ const TABLE: &[(&str, &str)] = &[
     ("reduce", "reduce_maxabs"),
     ("transport", "ot_apply"),
     ("transport", "ot_apply_t"),
+    ("df64", "spmv_df64"),
+    ("df64", "ot_apply_df64"),
+    ("df64", "reduce_dot_df64"),
+    ("df64", "reduce_sum_df64"),
 ];
 
 impl Kernels {
@@ -50,6 +54,7 @@ impl Kernels {
             ("residuals", include_str!("shaders/residuals.wgsl")),
             ("reduce", include_str!("shaders/reduce.wgsl")),
             ("transport", include_str!("shaders/transport.wgsl")),
+            ("df64", include_str!("shaders/df64.wgsl")),
         ]);
         let mut modules: HashMap<&str, wgpu::ShaderModule> = HashMap::new();
         for (name, src) in sources {
@@ -117,14 +122,32 @@ pub(crate) fn pass_dispatch(
 pub struct Reducer {
     scratch_a: wgpu::Buffer,
     scratch_b: wgpu::Buffer,
+    df64: bool,
 }
 
 impl Reducer {
     pub fn new(device: &wgpu::Device, max_len: usize) -> Self {
+        Self::new_with_precision(device, max_len, false)
+    }
+
+    pub fn new_with_precision(device: &wgpu::Device, max_len: usize, df64: bool) -> Self {
         let max_partials = max_len.div_ceil(256).clamp(1, 4096);
         Self {
             scratch_a: buffers::storage_zeros_f32(device, max_partials, "reduce_a"),
             scratch_b: buffers::storage_zeros_f32(device, max_partials, "reduce_b"),
+            df64,
+        }
+    }
+
+    /// df64 mode swaps the dot/sum entry points; maxabs is precision-neutral.
+    fn entry(&self, name: &'static str) -> &'static str {
+        if !self.df64 {
+            return name;
+        }
+        match name {
+            "reduce_dot" => "reduce_dot_df64",
+            "reduce_sum" => "reduce_sum_df64",
+            other => other,
         }
     }
 
@@ -137,14 +160,18 @@ impl Reducer {
         dev: &wgpu::Device,
         enc: &mut wgpu::CommandEncoder,
         k: &Kernels,
-        first: &str,
+        first: &'static str,
         a: &wgpu::Buffer,
         b: Option<&wgpu::Buffer>,
         n: usize,
-        follow: &str,
+        follow: &'static str,
         results: &wgpu::Buffer,
         slot: u32,
     ) {
+        // df64 mode remaps dot/sum to their double-double entry points; off, the
+        // names pass through unchanged so pipeline selection is byte-identical.
+        let first = self.entry(first);
+        let follow = self.entry(follow);
         let mut len = n;
         let mut src: &wgpu::Buffer = a;
         let mut dst = &self.scratch_a;
@@ -161,7 +188,7 @@ impl Reducer {
             let ubuf = buffers::uniform_bytes(dev, &params.bytes(), "reduce_params");
             let pl = k.pipeline(entry);
             let mut e: Vec<(u32, &wgpu::Buffer)> = vec![(0, &ubuf), (1, src), (6, dst)];
-            if entry == "reduce_dot" {
+            if entry.starts_with("reduce_dot") {
                 e.push((2, b.expect("dot needs b")));
             }
             let bg = bind(dev, pl, &e);
@@ -260,11 +287,11 @@ impl Reducer {
         &self,
         ctx: &GpuContext,
         k: &Kernels,
-        first: &str,
+        first: &'static str,
         a: &wgpu::Buffer,
         b: Option<&wgpu::Buffer>,
         n: usize,
-        follow: &str,
+        follow: &'static str,
     ) -> f32 {
         let results = buffers::storage_zeros_f32(&ctx.device, 1, "reduce_result");
         let mut enc = ctx.device.create_command_encoder(&Default::default());

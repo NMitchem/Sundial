@@ -36,6 +36,9 @@ enum Cmd {
         max_iters: u64,
         #[arg(long)]
         json: bool,
+        /// Opt-in df64 (double-double) GPU accumulation (M2 experiment).
+        #[arg(long)]
+        df64: bool,
     },
     /// Solve every *.mps / *.mps.gz in a directory, write a CSV
     Bench {
@@ -46,6 +49,9 @@ enum Cmd {
         engine: Engine,
         #[arg(long, default_value = "results.csv")]
         out: PathBuf,
+        /// Opt-in df64 (double-double) GPU accumulation (M2 experiment).
+        #[arg(long)]
+        df64: bool,
     },
     /// Render a bench results CSV + known optima into report.md
     Report {
@@ -69,6 +75,9 @@ enum Cmd {
         max_iters: u64,
         #[arg(long)]
         json: bool,
+        /// Opt-in df64 (double-double) GPU accumulation (M2 experiment).
+        #[arg(long)]
+        df64: bool,
     },
 }
 
@@ -109,6 +118,7 @@ fn solve_file(
     max_iters: u64,
     engine: Engine,
     quiet: bool,
+    df64: bool,
 ) -> Result<Solution> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let p =
@@ -116,6 +126,7 @@ fn solve_file(
     let opts = SolveOptions {
         tol,
         max_iters,
+        df64,
         ..Default::default()
     };
     let mut on_progress = |e: ProgressEvent| {
@@ -154,8 +165,9 @@ fn main() -> Result<()> {
             engine,
             max_iters,
             json,
+            df64,
         } => {
-            let sol = solve_file(&file, tol, max_iters, engine, json)?;
+            let sol = solve_file(&file, tol, max_iters, engine, json, df64)?;
             let name = file.file_stem().unwrap_or_default().to_string_lossy();
             if json {
                 println!("{}", serde_json::to_string_pretty(&report(&name, &sol))?);
@@ -182,6 +194,7 @@ fn main() -> Result<()> {
             tol,
             engine,
             out,
+            df64,
         } => {
             let mut rows = vec![
                 "name,status,objective,iterations,solve_ms,rel_primal,rel_dual,rel_gap".to_string(),
@@ -203,7 +216,7 @@ fn main() -> Result<()> {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                match solve_file(&f, tol, 2_000_000, engine, true) {
+                match solve_file(&f, tol, 2_000_000, engine, true, df64) {
                     Ok(s) => {
                         let r = report(&name, &s);
                         println!(
@@ -251,6 +264,7 @@ fn main() -> Result<()> {
             engine,
             max_iters,
             json,
+            df64,
         } => {
             let preset: sundial_core::transport::Preset =
                 preset.parse().map_err(|e: String| anyhow::anyhow!(e))?;
@@ -263,6 +277,7 @@ fn main() -> Result<()> {
             let opts = SolveOptions {
                 tol,
                 max_iters,
+                df64,
                 ..Default::default()
             };
             let mut on_progress = |e: ProgressEvent| {
@@ -282,10 +297,11 @@ fn main() -> Result<()> {
                         "GPU: {} (max binding {} MiB)",
                         ctx.adapter_name, ctx.max_binding_mib
                     );
-                    let gop = sundial_core::gpu::op::TransportGpuOp::new(
+                    let gop = sundial_core::gpu::op::TransportGpuOp::new_with_precision(
                         &ctx.device,
                         grid * grid,
                         grid * grid,
+                        df64,
                     );
                     pollster::block_on(sundial_core::gpu::engine::solve_gpu_op(
                         &ctx,
