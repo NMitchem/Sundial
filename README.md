@@ -8,8 +8,8 @@ zero install and no CUDA anywhere.
 now with matrix-free operators: a 1,048,576-variable optimal-transport
 problem (two 32×32 grids) solves to verified 1e-4 in ~9.4 s natively
 (Apple M4 Pro / Metal), with no constraint matrix ever materialized. The
-same wasm/WebGPU code runs it in a browser tab (interactive run pending
-confirmation). A
+same wasm/WebGPU code solves it in a browser tab — confirmed interactively:
+Optimal (CPU-f64-verified), 16,000 iterations at ~0.55 ms/iter. A
 drop-a-file benchmark page and a Netlib sweep round out the CLI tooling.
 Every "Optimal" is still re-verified on the CPU in f64 — the GPU never
 grades its own homework. The optimality certificate is evaluated at a
