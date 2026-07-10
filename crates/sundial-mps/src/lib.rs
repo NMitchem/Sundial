@@ -159,10 +159,20 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
                 }
             }
             Section::Rhs => {
-                if toks.len() < 3 || toks.len().is_multiple_of(2) {
-                    return Err(err(lineno, "RHS line needs 'set row val [row val]'"));
+                if toks.len() < 2 {
+                    return Err(err(
+                        lineno,
+                        "RHS line needs 'row val' pairs (optionally preceded by a set name)",
+                    ));
                 }
-                for pair in toks[1..].chunks(2) {
+                // Odd token count ⇒ first token is the (ignored) set name;
+                // even ⇒ classical set-name-less form (netlib blend.mps).
+                let pairs = if toks.len() % 2 == 1 {
+                    &toks[1..]
+                } else {
+                    &toks[..]
+                };
+                for pair in pairs.chunks(2) {
                     let val: f64 = pair[1]
                         .parse()
                         .map_err(|_| err(lineno, format!("bad number '{}'", pair[1])))?;
@@ -212,9 +222,9 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
                 match bt {
                     "UP" => {
                         bounds_up[j] = Some(val);
-                        if val < 0.0 {
-                            up_negative[j] = true;
-                        }
+                        // Assign, don't OR: a later positive UP for the same
+                        // column supersedes an earlier negative one.
+                        up_negative[j] = val < 0.0;
                     }
                     "LO" => bounds_lo[j] = Some(val),
                     "FX" => {

@@ -129,3 +129,50 @@ fn negative_up_with_explicit_lo_keeps_lo() {
     ).unwrap();
     assert_eq!(p2.col_lower[0], -9.0);
 }
+
+#[test]
+fn rhs_without_set_name_parses() {
+    // blend.mps style: RHS lines are bare `row val [row val]` pairs (even
+    // token count, no set-name field). Classical MPS permits omitting it.
+    let p = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\n G r2\nCOLUMNS\n x obj 1.0 r1 1.0\n x r2 1.0\nRHS\n r1 5.0 r2 1.0\nENDATA\n",
+    )
+    .unwrap();
+    assert_eq!(p.row_upper[0], 5.0); // L row: rhs sets upper
+    assert_eq!(p.row_lower[1], 1.0); // G row: rhs sets lower
+}
+
+#[test]
+fn rhs_with_set_name_still_parses() {
+    // regression pin: the odd-token (named-set) form keeps working
+    let p = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n rhs r1 5.0\nENDATA\n",
+    )
+    .unwrap();
+    assert_eq!(p.row_upper[0], 5.0);
+}
+
+#[test]
+fn rhs_set_name_less_unknown_row_is_an_error() {
+    let e = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n nope 5.0\nENDATA\n",
+    )
+    .unwrap_err()
+    .to_string();
+    // 2 tokens, even ⇒ parsed as a bare `row val` pair; 'nope' isn't a row
+    assert!(e.contains("unknown row 'nope'"), "{e}");
+}
+
+#[test]
+fn repeated_up_lines_reset_negativity() {
+    // M1-review hardening: UP -2 then UP +5 must NOT leave lower at -inf
+    let p = sundial_mps::parse_str(
+        "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n rhs r1 5.0\nBOUNDS\n UP bnd x -2.0\n UP bnd x 5.0\nENDATA\n",
+    )
+    .unwrap();
+    assert_eq!(p.col_upper[0], 5.0);
+    assert_eq!(
+        p.col_lower[0], 0.0,
+        "negativity flag must reset on the later positive UP"
+    );
+}
