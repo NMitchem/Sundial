@@ -8,10 +8,10 @@ Carried from the M1 plan and the whole-milestone review; none block M1.
 - Comparison automation against published CPU/CUDA numbers (report links plato; a curated overlap table is manual today).
 - Chart: true partial redraw if rAF coalescing proves insufficient at hero scale.
 - Movement-based (‖Δx‖/‖Δy‖) primal-weight update if the explicit (Ruiz+PC-equilibrated) path ever needs ω — the residual-ratio version limit-cycles there (Task 6a adjudication).
-- blend.mps RHS format support (set-name-less RHS lines — real-world netlib corner; currently an honest Error row).
-- up_negative flag not reset on repeated same-column UP lines (contrived input; one-line hardening).
-- e226 objective-constant sign-convention: consider a per-instance note column or alternate-convention value in the optima data (do NOT silently change values — see README/STATUS footnote).
-- Scrub '|' from error text before markdown table rendering (report.rs).
+- ~~blend.mps RHS format support (set-name-less RHS lines — real-world netlib corner; currently an honest Error row).~~ **Done in M2 Task 1** (blend now solves Optimal; sweep 0 parse errors).
+- ~~up_negative flag not reset on repeated same-column UP lines (contrived input; one-line hardening).~~ **Done in M2 Task 1.**
+- ~~e226 objective-constant sign-convention: consider a per-instance note column or alternate-convention value in the optima data (do NOT silently change values — see README/STATUS footnote).~~ **Done in M2** (note column added to `netlib_optima.csv`; values unchanged).
+- ~~Scrub '|' from error text before markdown table rendering (report.rs).~~ **Done in M2** (backlog-hygiene item in the M2 spec).
 
 ## M3 code-hygiene (from M2 final review)
 

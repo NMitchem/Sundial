@@ -1,12 +1,12 @@
 # Sundial — Project Status
 
-Updated: 2026-07-10 (M2 completion, launch-ready-unpublished)
+Updated: 2026-07-14 (M2 closed — browser human gate passed; launch-ready, unpublished)
 
 ## Milestones
 
 - [x] **M0** — GPU solver core (restarted PDHG in WGSL), MPS parser, CPU f64 reference, CLI, Netlib gate, minimal web demo. **Merged to main 2026-07-07.**
 - [x] **M1** — matrix-free `LinOp`; optimal-transport hero at 1,048,576 variables, native + in-browser; drop-a-file benchmark page; CLI Netlib sweep tooling producing the comparison table. **All 13 implementation tasks (1–11 + 6a) complete and review-approved.**
-- [x] **M2** (spec: `docs/superpowers/specs/2026-07-10-sundial-m2-design.md`) — parser hardening, infeasibility/unboundedness detection, df64 precision experiment, three new transport presets + draw-your-own masses, GPU-presolve literature memo, launch writeup + RELEASE checklist, and the `sundial-lp` npm package. **All 12 implementation tasks complete and review-approved.** Done except the browser human gate (draw-your-own + a new preset + one infeasible-file drop on the bench page — same M0/M1 precedent of closing on user confirmation). Backlog carried forward: `docs/superpowers/m2-backlog.md` + M3 seeds below.
+- [x] **M2** (spec: `docs/superpowers/specs/2026-07-10-sundial-m2-design.md`) — parser hardening, infeasibility/unboundedness detection, df64 precision experiment, three new transport presets + draw-your-own masses, GPU-presolve literature memo, launch writeup + RELEASE checklist, and the `sundial-lp` npm package. **All 12 implementation tasks complete and review-approved; browser human gate passed 2026-07-14 — M2 closed.** Backlog carried forward: `docs/superpowers/m2-backlog.md` + M3 seeds below.
 
 **Launch bar** (from spec): hero ≥1M vars → 1e-4 interactive on a MacBook; ≥25 Netlib + ≥5 large instances in the table; `npm install` works; writeup done. **Met** — sweep table now covers 32/32 netlib instances (20 Optimal + 12 honest IterationLimit, 0 parse errors), all of them small/medium classic-Netlib; the ≥5-large-instance bar is met by the 1M-variable transport hero, reported separately (M1/M2 results below, `docs/writeup.md`), not by additional rows in that table; `sundial-lp` packs cleanly via `npm pack` (never published — see M2 results); `docs/writeup.md` is a complete Show HN draft with `<DEMO_URL>` as its sole unfilled placeholder.
 
@@ -20,6 +20,7 @@ Updated: 2026-07-10 (M2 completion, launch-ready-unpublished)
 - **npm package `sundial-lp`** (Task 12, final): wasm bindings migrated out of `sundial-mps` into a dedicated publishable crate, `crates/sundial-web` (package name `sundial-lp`). **Name-check: `npm view sundial-lp` → `npm error code E404` / `404 Not Found` — available**, no fallback name needed. Built via `scripts/build_npm.sh` (`wasm-pack build --release` + `npm pack --dry-run`); `npm pack` tarball (`sundial-lp-0.1.0.tgz`, 180.9 kB) contains exactly the expected 8 files — `LICENSE-APACHE`, `LICENSE-MIT`, `README.md`, `package.json`, `sundial_lp_bg.wasm`, `sundial_lp.d.ts`, `sundial_lp.js`, `types-extra.d.ts` (hand-maintained result-shape types, since generated bindings type `serde_wasm_bindgen` results as `any`). Also added a `webgpuAvailable()` capability probe (checks `navigator.gpu` without requesting a device). **`npm publish` was never run — packed, not published**, per the milestone decision. `web/` (both demo pages) repointed to `crates/sundial-web/pkg/sundial_lp`; CI and `scripts/verify_clean_checkout.sh` repointed to build/lint `-p sundial-lp` / `crates/sundial-web`. One packaging gap found and fixed during implementation: wasm-pack copies `LICENSE-APACHE`/`LICENSE-MIT` into `pkg/` but does not add them to `package.json`'s `files` allowlist (only a bare `LICENSE`/`LICENCE` is auto-packed by npm), so `build_npm.sh` now explicitly lists both via `npm pkg set`.
 - **Launch artifacts** (Task 11): `docs/writeup.md` — a complete 9-section Show HN draft with `<DEMO_URL>` as its sole placeholder; `RELEASE.md` — the human-run publish checklist (repo-public → CI → demo deploy → npm publish → post), nothing on it executed. Both already anticipate the `sundial-lp` / `crates/sundial-web` naming finalized in this task.
 - Suites (Task 12 final run, all green): workspace CPU suites incl. `sundial-lp` (0 tests, empty crate off wasm32 by design); GPU suites incl. the 1M transport gate and both Netlib gates (`--include-ignored`, CPU 3/3 + GPU 5/5); fmt; clippy `-D warnings` (native workspace + wasm32 `-p sundial-lp`); `npm pack` tarball inspected; tsc clean; vite build (both dist pages, wasm asset now `sundial_lp_bg-*.wasm`); `scripts/verify_clean_checkout.sh` (fresh clone, full rebuild) green.
+- **Browser human gate: PASSED, user-confirmed 2026-07-14** (wasm-pack rebuild + `cd web && npm run dev`, same session/dev-server pattern as M0/M1): a new transport preset solved to `Optimal (CPU f64 verified)` on the hero page; a draw-your-own masses instance solved to `Optimal`; an infeasible-set `.mps` drop on the bench page reported certified `Infeasible` — no false `Optimal`, no error row. This was the last open M2 closure item.
 
 ## M1 results (verified on Apple M4 Pro / Metal, 2026-07-07)
 
@@ -72,9 +73,7 @@ Updated: 2026-07-10 (M2 completion, launch-ready-unpublished)
 ## Known gaps / notes
 
 - No GitHub remote yet — the CI workflow (`.github/workflows/ci.yml`) has never executed on GitHub runners.
-- Interactive browser verification of the M1 transport hero page: pending user confirmation (dev server runs via `cd web && npm run dev`); see M1 results above.
 - Task-level execution records (briefs, implementer reports, review verdicts) were session scratch (`.superpowers/sdd/`, gitignored); their outcomes are summarized here and in the plan's adjudication commits.
-- **M2 browser human gate: OPEN.** Same session/dev-server pattern as M0/M1: a new preset, draw-your-own masses, and one infeasible-file drop on the bench page need interactive confirmation before M2 is fully closed; the full milestone verification suite + this gate + a final whole-branch review are orchestrated by the controller after Task 12.
 - `npm publish` for `sundial-lp` has never been run anywhere — the package exists only as a local, inspected `.tgz` (see M2 results); publishing is a `RELEASE.md` step, not part of this milestone.
 
 ## M3 seeds (carried out of M2, for the next plan)
