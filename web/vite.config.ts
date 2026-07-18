@@ -9,6 +9,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         bench: fileURLToPath(new URL("./bench.html", import.meta.url)),
+        taxi: fileURLToPath(new URL("./taxi.html", import.meta.url)),
       },
     },
   },

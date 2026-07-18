@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Every open ride in Manhattan, dispatched perfectly — on your GPU</title>
+    <style>
+      body { font: 15px/1.55 system-ui, sans-serif; background: #0b0e14; color: #d8dee9;
+             max-width: 980px; margin: 1.5rem auto; padding: 0 1rem; }
+      a { color: #8fb4ff; }
+      h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+      #layout { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; }
+      #map-wrap { position: relative; flex: 0 0 auto; }
+      #map-wrap canvas { position: absolute; inset: 0; }
+      #map-wrap canvas:first-child { position: static; } /* base sets the box size */
+      #panel { flex: 1 1 260px; min-width: 260px; }
+      #dispatch { font-size: 1.05rem; padding: .6rem 1.4rem; border-radius: 8px;
+                  border: 1px solid #f5d90a; background: #1a1500; color: #f5d90a; cursor: pointer; }
+      #dispatch:disabled { opacity: .4; cursor: default; }
+      #phase { min-height: 3.2em; margin: .8rem 0 .3rem; }
+      #miles { font-size: 1.6rem; font-variant-numeric: tabular-nums; min-height: 1.3em; }
+      #dare { color: #46a758; min-height: 1.4em; margin: .5rem 0; }
+      #poke-hint { color: #8fb4ff; min-height: 1.4em; }
+      #banner { color: #f5a623; min-height: 0; }
+      #receipts { font-size: 12px; color: #7b8496; margin-top: 1rem;
+                  font-variant-numeric: tabular-nums; }
+      #nogpu { display: none; border: 1px solid #444; border-radius: 8px; padding: 1rem; }
+      #caption { font-size: 13px; color: #9aa3b5; }
+      footer { font-size: 12px; color: #667; margin-top: 1.2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Every open ride in Manhattan, dispatched perfectly</h1>
+    <p id="caption">
+      Manhattan — Friday, June 5, 2015, 6:03&nbsp;PM.
+      <b>1,024</b> open ride requests (white), <b>1,152</b> free cabs (yellow).
+      Real positions from the public NYC&nbsp;TLC record — the last era with exact GPS
+      coordinates in the data. Free-cab positions are the previous 12 minutes' drop-offs.
+    </p>
+    <div id="nogpu">
+      <p>This browser has no WebGPU (Chrome/Edge 113+, Firefox 141+, or Safari 26+ required)
+         — here is what it looks like:</p>
+      <video src="taxi/loop.mp4" poster="taxi/poster.png" autoplay muted loop playsinline
+             style="max-width:100%; border-radius:8px"></video>
+    </div>
+    <div id="layout">
+      <div id="map-wrap">
+        <canvas id="base"></canvas>
+        <canvas id="dots"></canvas>
+        <canvas id="lines"></canvas>
+      </div>
+      <div id="panel">
+        <button id="dispatch">DISPATCH MANHATTAN</button>
+        <p id="phase"></p>
+        <div id="miles"></div>
+        <p id="dare"></p>
+        <p id="banner"></p>
+        <p id="poke-hint"></p>
+        <div id="receipts"></div>
+      </div>
+    </div>
+    <footer>
+      Solved live by <a href="index.html">Sundial</a>, an LP solver running as WebGPU compute
+      shaders in your browser. "Optimal" is only ever claimed after an independent CPU-f64
+      re-verification of the exact returned answer. Distances are straight-line; "free cab"
+      is a drop-off-based proxy. Nothing leaves your machine.
+    </footer>
+    <script type="module" src="/src/taxi/main-taxi.ts"></script>
+  </body>
+</html>
