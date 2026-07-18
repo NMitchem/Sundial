@@ -10,9 +10,11 @@
 //!
 //! **Honesty contract.** `recover_matching` makes NO optimality claim. The
 //! claim is made by *comparison*: callers report the returned `total_cost`
-//! against the CPU-f64 KKT-verified dual objective from the SAME solve (the
-//! certified floor, `dual_obj × nt` in coordinate units) and phrase display
-//! copy from the measured slack. Nothing here is certificate-grade.
+//! against `certified_floor` (a rigorous CPU-f64 lower bound on the matching
+//! optimum via a repaired + coordinate-ascent-tightened feasible dual, in the
+//! same coordinate units) and phrase display copy from the measured, always
+//! non-negative slack. `recover_matching` itself is not certificate-grade; the
+//! floor is (weak duality, feasible by construction).
 //!
 //! Algorithm:
 //!   1. Sparse candidate graph = LP-support edges (entries above a small
@@ -85,31 +87,142 @@ pub fn segments_cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> boo
     (d1 * d2 < 0.0) && (d3 * d4 < 0.0)
 }
 
+/// Default dual-ascent sweep cap for `certified_floor`.
+pub const FLOOR_MAX_SWEEPS: usize = 100;
+
+/// Result of the certified-floor computation with ascent diagnostics.
+#[derive(Debug, Clone, Copy)]
+pub struct CertifiedFloor {
+    /// Rigorous lower bound on the (unscaled, mass-1) matching optimum.
+    pub value: f64,
+    /// Dual-ascent sweeps actually performed (≤ the requested cap; fewer if the
+    /// floor converged early).
+    pub sweeps: usize,
+}
+
 /// Rigorous CPU-f64 certified lower bound on the (unscaled, mass-1) matching
-/// optimum, via a REPAIRED feasible dual (weak duality). This value is ≤ the
-/// true optimum BY CONSTRUCTION — independent of the solver's tolerance — so it
-/// is a genuine floor, not the tolerance-dependent readout `dual_obj × nt`
-/// (which at tol 1e-4 overshoots the optimum; see task-4a-report.md).
+/// optimum, via a REPAIRED + coordinate-ascent-tightened feasible dual (weak
+/// duality). The value is ≤ the true optimum BY CONSTRUCTION at every iterate —
+/// independent of the solver's tolerance — so it is a genuine floor, not the
+/// tolerance-dependent readout `dual_obj × nt` (which at tol 1e-4 overshoots the
+/// optimum; see task-4a-report.md). This is the diagnostic form returning the
+/// sweep count; `certified_floor` wraps it for the plain `f64`.
 ///
 /// `y` is the solver-returned dual in the `OpProblem`'s own row space:
 /// `y[0..ns]` = rider equality rows, `y[ns..ns+nt]` = cab capacity rows.
-/// `rider_mass` / `cab_cap` are the H3-scaled masses (both `1/nt`). The bound
-/// is formed in scaled space and rescaled to unscaled distance units (× nt,
-/// consistent with `total_cost = primal_obj × nt`), so it is directly
-/// comparable to `RecoveredMatching::total_cost`.
+/// `rider_mass` / `cab_cap` are the H3-scaled masses (both `1/nt`). The bound is
+/// formed in scaled space and rescaled to unscaled distance units (× nt,
+/// consistent with `total_cost = primal_obj × nt`), so it is directly comparable
+/// to `RecoveredMatching::total_cost`.
 ///
 /// LP dual of `min Σ c_ij x_ij` s.t. rider rows `Σ_j x_ij = m_i` (dual `u_i`
-/// free), cab rows `Σ_i x_ij ≤ cap_j` (dual `v_j ≤ 0`), `x ≥ 0`: dual
-/// feasibility is `u_i + v_j ≤ c_ij` ∀i,j. The solver's reduced-cost convention
-/// is `c_ij + y_i + y_{ns+j} ≥ 0` (see `kkt::residuals_view`), i.e. `u_i = −y_i`,
-/// `v_j = −y_{ns+j}`. Repair (feasible for ANY input `y`): force `v_j ←
-/// min(−y_{ns+j}, 0)` (`v ≤ 0`); recompute `u_i ← min_j (c_ij − v_j)` (the
-/// largest feasible `u`); then `floor_scaled = Σ_i m_i·u_i + Σ_j cap_j·v_j`,
-/// returned as `floor_scaled × nt`.
+/// free), cab rows `Σ_i x_ij ≤ cap_j` (dual `v_j ≤ 0`), `x ≥ 0`: dual feasibility
+/// is `u_i + v_j ≤ c_ij` ∀i,j; the objective is `max Σ m_i u_i + Σ cap_j v_j`.
+/// The solver's reduced-cost convention is `c_ij + y_i + y_{ns+j} ≥ 0` (see
+/// `kkt::residuals_view`), i.e. `v_j = −y_{ns+j}`.
 ///
-/// The rider duals `y[0..ns]` are NOT trusted — `u` is reconstructed entirely
-/// from `v` and freshly-recomputed f64 distances (no cached cost). `(u, v)` is
-/// dual-feasible by construction ⇒ `floor ≤ optimum`, rigorously.
+/// Steps: (init) `v_j ← min(−y_{ns+j}, 0)`, then `u_i ← min_j(c_ij − v_j)`;
+/// (ascent) alternate the two exact coordinate-wise maximizers —
+/// `v_j ← min(0, min_i(c_ij − u_i))` then `u_i ← min_j(c_ij − v_j)`. Each
+/// half-step keeps `(u, v)` feasible and never decreases the objective, so the
+/// bound stays rigorous every sweep and only tightens. Iterate up to
+/// `max_sweeps`, stopping early once a sweep gains `< 1e-9·(1+|floor|)`.
+///
+/// The rider duals `y[0..ns]` are NOT trusted — `u` is reconstructed from `v`.
+/// The distance matrix is recomputed fresh in f64 from the input coordinates at
+/// entry (no external/cached cost trusted) and reused across sweeps.
+pub fn certified_floor_ascent(
+    y: &[f64],
+    riders: &[[f64; 2]],
+    cabs: &[[f64; 2]],
+    rider_mass: f64,
+    cab_cap: f64,
+    max_sweeps: usize,
+) -> CertifiedFloor {
+    let ns = riders.len();
+    let nt = cabs.len();
+    assert_eq!(y.len(), ns + nt, "dual length must be ns + nt");
+
+    // Fresh f64 distance matrix (row-major), recomputed from coordinates — no
+    // external/cached cost trusted. Reused across sweeps so each is O(ns·nt)
+    // min-reductions with no repeated sqrt. Transient footprint: ns·nt·8 bytes.
+    let mut dmat = vec![0.0f64; ns * nt];
+    for (i, r) in riders.iter().enumerate() {
+        let row = &mut dmat[i * nt..(i + 1) * nt];
+        for (j, k) in cabs.iter().enumerate() {
+            row[j] = dist(*r, *k);
+        }
+    }
+
+    // u ← min_j (dmat_ij − v_j), row-sequential over dmat.
+    let update_u = |dmat: &[f64], v: &[f64], u: &mut [f64]| {
+        for (i, u_i) in u.iter_mut().enumerate() {
+            let row = &dmat[i * nt..(i + 1) * nt];
+            let mut m = f64::INFINITY;
+            for j in 0..nt {
+                let cand = row[j] - v[j];
+                if cand < m {
+                    m = cand;
+                }
+            }
+            *u_i = m;
+        }
+    };
+    // v_j ← min(0, min_i (dmat_ij − u_i)), accumulated row-sequential over dmat.
+    let update_v = |dmat: &[f64], u: &[f64], v: &mut [f64]| {
+        for vj in v.iter_mut() {
+            *vj = f64::INFINITY;
+        }
+        for (i, &u_i) in u.iter().enumerate() {
+            let row = &dmat[i * nt..(i + 1) * nt];
+            for (j, vj) in v.iter_mut().enumerate() {
+                let cand = row[j] - u_i;
+                if cand < *vj {
+                    *vj = cand;
+                }
+            }
+        }
+        for vj in v.iter_mut() {
+            if *vj > 0.0 {
+                *vj = 0.0;
+            }
+        }
+    };
+    // Coordinate-unit floor Σ m_i u_i + Σ cap_j v_j, × nt (see doc: under H3
+    // rider_mass = cab_cap = 1/nt ⇒ × nt gives the mass-1 bound Σ u + Σ v).
+    let nt_f = nt as f64;
+    let coord_floor = |u: &[f64], v: &[f64]| -> f64 {
+        (rider_mass * u.iter().sum::<f64>() + cab_cap * v.iter().sum::<f64>()) * nt_f
+    };
+
+    // init: repair v from y, then the largest feasible u.
+    let mut v: Vec<f64> = (0..nt).map(|j| (-y[ns + j]).min(0.0)).collect();
+    let mut u = vec![0.0f64; ns];
+    update_u(&dmat, &v, &mut u);
+    let mut floor = coord_floor(&u, &v);
+
+    // ascent: alternate exact block maximizers, monotone + feasible every step.
+    let mut sweeps = 0;
+    for _ in 0..max_sweeps {
+        update_v(&dmat, &u, &mut v);
+        update_u(&dmat, &v, &mut u);
+        sweeps += 1;
+        let new_floor = coord_floor(&u, &v);
+        let gained = new_floor - floor;
+        floor = new_floor;
+        if gained < 1e-9 * (1.0 + new_floor.abs()) {
+            break;
+        }
+    }
+
+    CertifiedFloor {
+        value: floor,
+        sweeps,
+    }
+}
+
+/// Convenience wrapper: `certified_floor_ascent` with the default sweep cap,
+/// returning just the rigorous bound. This is the stable call-site API.
 pub fn certified_floor(
     y: &[f64],
     riders: &[[f64; 2]],
@@ -117,35 +230,7 @@ pub fn certified_floor(
     rider_mass: f64,
     cab_cap: f64,
 ) -> f64 {
-    let ns = riders.len();
-    let nt = cabs.len();
-    assert_eq!(y.len(), ns + nt, "dual length must be ns + nt");
-
-    // 1. cab-side duals, forced feasible (v ≤ 0)
-    let v: Vec<f64> = (0..nt).map(|j| (-y[ns + j]).min(0.0)).collect();
-
-    // 2. + 3. largest feasible rider potentials, accumulated into the scaled
-    //    dual objective. c_ij is recomputed in f64 here — no cached cost.
-    let mut floor_scaled = 0.0f64;
-    for r in riders {
-        let mut u_i = f64::INFINITY;
-        for (j, k) in cabs.iter().enumerate() {
-            let c_ij = dist(*r, *k);
-            let cand = c_ij - v[j];
-            if cand < u_i {
-                u_i = cand;
-            }
-        }
-        floor_scaled += rider_mass * u_i;
-    }
-    for &vj in &v {
-        floor_scaled += cab_cap * vj;
-    }
-
-    // Rescale scaled → unscaled distance units. Under H3, rider_mass = cab_cap =
-    // 1/nt, so × nt yields the mass-1 coordinate-unit floor (Σ u + Σ v), exactly
-    // matching how total_cost = primal_obj × nt is rescaled.
-    floor_scaled * nt as f64
+    certified_floor_ascent(y, riders, cabs, rider_mass, cab_cap, FLOOR_MAX_SWEEPS).value
 }
 
 /// Total-order key over f64 distances for the Dijkstra heap (f64 is not `Ord`).

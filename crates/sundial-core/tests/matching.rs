@@ -299,6 +299,8 @@ fn certified_floor_is_valid_lower_bound() {
 
 #[test]
 fn certified_floor_is_nearly_tight() {
+    // With dual coordinate ascent enabled, the floor should reach the LP dual
+    // optimum ( = matching optimum, integral LP) to within f64 rounding at n≤7.
     let mut rng = fastrand::Rng::with_seed(43);
     for trial in 0..5 {
         let riders = random_points(3 + trial, &mut rng); // 3..=7
@@ -314,9 +316,36 @@ fn certified_floor_is_nearly_tight() {
             "trial {trial}: floor {floor} exceeds optimum {bf}",
         );
         assert!(
-            floor >= bf - 1e-3 * (1.0 + bf.abs()),
+            floor >= bf - 1e-6 * (1.0 + bf.abs()),
             "trial {trial}: floor {floor} not tight vs optimum {bf}",
         );
+    }
+}
+
+#[test]
+fn certified_floor_ascent_is_monotone() {
+    // Each sweep is an exact block maximizer ⇒ floor(k+1) ≥ floor(k).
+    let mut rng = fastrand::Rng::with_seed(53);
+    for trial in 0..8 {
+        let ns = 2 + trial % 5;
+        let riders = random_points(ns, &mut rng);
+        let cabs = random_points(ns + 3, &mut rng);
+        let nt = cabs.len();
+        let m = 1.0 / nt as f64;
+        // exercise both a solved dual and a garbage dual
+        let sol = solve_scaled(&riders, &cabs);
+        let garbage: Vec<f64> = (0..ns + nt).map(|_| rng.f64() * 10.0 - 5.0).collect();
+        for y in [sol.y.clone(), garbage] {
+            let mut prev = f64::NEG_INFINITY;
+            for k in [0usize, 1, 2, 3, 5, 10, 25] {
+                let f = recover::certified_floor_ascent(&y, &riders, &cabs, m, m, k).value;
+                assert!(
+                    f >= prev - 1e-9 * (1.0 + prev.abs()),
+                    "trial {trial}: floor at {k} sweeps ({f}) < previous ({prev})",
+                );
+                prev = f;
+            }
+        }
     }
 }
 

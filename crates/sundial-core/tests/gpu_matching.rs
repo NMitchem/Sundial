@@ -84,19 +84,29 @@ fn gpu_matches_manhattan_fixture_to_1e4() {
         }
     }
 
-    // RIGOROUS certified floor via a repaired feasible dual (weak duality) — a
-    // true lower bound on the matching optimum, independent of solver tolerance
-    // (unlike the tolerance-dependent readout `dual_obj × nt`, which overshoots
-    // at tol 1e-4; see task-4a-report.md). Both `certified_floor` and
-    // `total_cost` are in unscaled coordinate units.
+    // RIGOROUS certified floor via a repaired + coordinate-ascent-tightened
+    // feasible dual (weak duality) — a true lower bound on the matching optimum,
+    // independent of solver tolerance (unlike the tolerance-dependent readout
+    // `dual_obj × nt`, which overshoots at tol 1e-4; see task-4a-report.md).
+    // Both `certified_floor` and `total_cost` are in unscaled coordinate units.
     let mass = 1.0 / nt as f64; // H3 scaling: rider_mass = cab_cap = 1/nt
-    let floor = recover::certified_floor(&sol.y, &riders, &cabs, mass, mass);
+    let t0 = std::time::Instant::now();
+    let cf = recover::certified_floor_ascent(
+        &sol.y,
+        &riders,
+        &cabs,
+        mass,
+        mass,
+        recover::FLOOR_MAX_SWEEPS,
+    );
+    let polish_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let floor = cf.value;
     let slack = rec.total_cost - floor;
     let slack_feet = slack * miles_per_unit * 5280.0;
 
     println!(
         "manhattan 1024x1152: {} iters, {} restarts, {:.0} ms, total_cost {:.6} units, \
-         certified_floor {:.6} units, slack {:.1} ft, support_edges {}",
+         certified_floor {:.6} units, slack {:.1} ft, support_edges {}, ascent {} sweeps / {:.1} ms",
         sol.stats.iterations,
         sol.stats.restarts,
         sol.stats.solve_ms,
@@ -104,6 +114,8 @@ fn gpu_matches_manhattan_fixture_to_1e4() {
         floor,
         slack_feet,
         rec.support_edges,
+        cf.sweeps,
+        polish_ms,
     );
 
     // The floor is a rigorous lower bound, so the recovered integral matching
