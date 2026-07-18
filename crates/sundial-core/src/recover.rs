@@ -85,6 +85,69 @@ pub fn segments_cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> boo
     (d1 * d2 < 0.0) && (d3 * d4 < 0.0)
 }
 
+/// Rigorous CPU-f64 certified lower bound on the (unscaled, mass-1) matching
+/// optimum, via a REPAIRED feasible dual (weak duality). This value is ≤ the
+/// true optimum BY CONSTRUCTION — independent of the solver's tolerance — so it
+/// is a genuine floor, not the tolerance-dependent readout `dual_obj × nt`
+/// (which at tol 1e-4 overshoots the optimum; see task-4a-report.md).
+///
+/// `y` is the solver-returned dual in the `OpProblem`'s own row space:
+/// `y[0..ns]` = rider equality rows, `y[ns..ns+nt]` = cab capacity rows.
+/// `rider_mass` / `cab_cap` are the H3-scaled masses (both `1/nt`). The bound
+/// is formed in scaled space and rescaled to unscaled distance units (× nt,
+/// consistent with `total_cost = primal_obj × nt`), so it is directly
+/// comparable to `RecoveredMatching::total_cost`.
+///
+/// LP dual of `min Σ c_ij x_ij` s.t. rider rows `Σ_j x_ij = m_i` (dual `u_i`
+/// free), cab rows `Σ_i x_ij ≤ cap_j` (dual `v_j ≤ 0`), `x ≥ 0`: dual
+/// feasibility is `u_i + v_j ≤ c_ij` ∀i,j. The solver's reduced-cost convention
+/// is `c_ij + y_i + y_{ns+j} ≥ 0` (see `kkt::residuals_view`), i.e. `u_i = −y_i`,
+/// `v_j = −y_{ns+j}`. Repair (feasible for ANY input `y`): force `v_j ←
+/// min(−y_{ns+j}, 0)` (`v ≤ 0`); recompute `u_i ← min_j (c_ij − v_j)` (the
+/// largest feasible `u`); then `floor_scaled = Σ_i m_i·u_i + Σ_j cap_j·v_j`,
+/// returned as `floor_scaled × nt`.
+///
+/// The rider duals `y[0..ns]` are NOT trusted — `u` is reconstructed entirely
+/// from `v` and freshly-recomputed f64 distances (no cached cost). `(u, v)` is
+/// dual-feasible by construction ⇒ `floor ≤ optimum`, rigorously.
+pub fn certified_floor(
+    y: &[f64],
+    riders: &[[f64; 2]],
+    cabs: &[[f64; 2]],
+    rider_mass: f64,
+    cab_cap: f64,
+) -> f64 {
+    let ns = riders.len();
+    let nt = cabs.len();
+    assert_eq!(y.len(), ns + nt, "dual length must be ns + nt");
+
+    // 1. cab-side duals, forced feasible (v ≤ 0)
+    let v: Vec<f64> = (0..nt).map(|j| (-y[ns + j]).min(0.0)).collect();
+
+    // 2. + 3. largest feasible rider potentials, accumulated into the scaled
+    //    dual objective. c_ij is recomputed in f64 here — no cached cost.
+    let mut floor_scaled = 0.0f64;
+    for r in riders {
+        let mut u_i = f64::INFINITY;
+        for (j, k) in cabs.iter().enumerate() {
+            let c_ij = dist(*r, *k);
+            let cand = c_ij - v[j];
+            if cand < u_i {
+                u_i = cand;
+            }
+        }
+        floor_scaled += rider_mass * u_i;
+    }
+    for &vj in &v {
+        floor_scaled += cab_cap * vj;
+    }
+
+    // Rescale scaled → unscaled distance units. Under H3, rider_mass = cab_cap =
+    // 1/nt, so × nt yields the mass-1 coordinate-unit floor (Σ u + Σ v), exactly
+    // matching how total_cost = primal_obj × nt is rescaled.
+    floor_scaled * nt as f64
+}
+
 /// Total-order key over f64 distances for the Dijkstra heap (f64 is not `Ord`).
 #[derive(PartialEq)]
 struct Key(f64);

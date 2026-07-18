@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use sundial_core::gpu::op::TransportGpuOp;
 use sundial_core::gpu::GpuContext;
 use sundial_core::problem::{SolveOptions, SolveStatus};
-use sundial_core::recover::{recover_matching, segments_cross};
+use sundial_core::recover::{self, recover_matching, segments_cross};
 use sundial_core::transport;
 
 /// Returns (riders, cabs, miles_per_unit) from the fixture JSON.
@@ -84,43 +84,38 @@ fn gpu_matches_manhattan_fixture_to_1e4() {
         }
     }
 
-    // Measured comparison against the certified dual objective. The H3 scaling
-    // multiplies the LP objective by 1/nt, so the certified CPU-f64 dual
-    // objective in coordinate units is `dual_obj × nt` (kkt::KktResiduals);
-    // recover's total_cost is already in coordinate units.
-    //
-    // MEASURED CAVEAT (see .superpowers/sdd/task-4a-report.md): at tol 1e-4 the
-    // scaled duality gap is ~1e-4 and its sign is negative (dual iterate just
-    // above the primal — a normal near-optimal PDHG artifact, neither iterate
-    // exactly feasible). Amplified by ×nt≈1152 this is ~0.1 coordinate units, so
-    // `dual_obj × nt` is NOT a strict lower bound here — it sits ~2.5% ABOVE the
-    // true optimum (≈8.68, cross-checked vs Task 4's unscaled run + the recovered
-    // cost). The recovered integral matching (the most accurate estimate) is
-    // therefore BELOW it and `slack` is NEGATIVE. The bound below is thus a
-    // one-sided check ("recovery is not WORSE than the certified objective
-    // readout by >5e-4"), which holds comfortably; the certificate itself is the
-    // only optimality authority. Slack sign/framing is flagged for adjudication.
-    let dual_floor = sol.stats.verified.dual_obj * nt as f64;
-    let slack = rec.total_cost - dual_floor;
+    // RIGOROUS certified floor via a repaired feasible dual (weak duality) — a
+    // true lower bound on the matching optimum, independent of solver tolerance
+    // (unlike the tolerance-dependent readout `dual_obj × nt`, which overshoots
+    // at tol 1e-4; see task-4a-report.md). Both `certified_floor` and
+    // `total_cost` are in unscaled coordinate units.
+    let mass = 1.0 / nt as f64; // H3 scaling: rider_mass = cab_cap = 1/nt
+    let floor = recover::certified_floor(&sol.y, &riders, &cabs, mass, mass);
+    let slack = rec.total_cost - floor;
     let slack_feet = slack * miles_per_unit * 5280.0;
-    let rel = slack / dual_floor.abs().max(1.0);
 
     println!(
         "manhattan 1024x1152: {} iters, {} restarts, {:.0} ms, total_cost {:.6} units, \
-         dual floor {:.6} units, slack {:.1} ft, support_edges {}",
+         certified_floor {:.6} units, slack {:.1} ft, support_edges {}",
         sol.stats.iterations,
         sol.stats.restarts,
         sol.stats.solve_ms,
         rec.total_cost,
-        dual_floor,
+        floor,
         slack_feet,
         rec.support_edges,
     );
 
+    // The floor is a rigorous lower bound, so the recovered integral matching
+    // (a feasible primal point) MUST cost at least as much: slack ≥ 0 is
+    // mathematically guaranteed. A negative value here would signal a scaling or
+    // sign bug in the floor/rescale — this assert is a real bug-catcher, not a
+    // tolerance check. (No upper bound asserted this round — the controller sets
+    // it from the printed measurement.)
     assert!(
-        rel <= 5e-4,
-        "recovered matching cost {} exceeds the certified objective {dual_floor} by {rel} \
-         (> 5e-4): slack {slack} ({slack_feet:.1} ft)",
+        slack >= 0.0,
+        "certified floor {floor} exceeds recovered cost {} (slack {slack}, {slack_feet:.1} ft): \
+         scaling/sign bug in certified_floor",
         rec.total_cost,
     );
 }

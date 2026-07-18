@@ -258,3 +258,77 @@ fn recovery_is_deterministic() {
     assert_eq!(a.total_cost, b.total_cost);
     assert_eq!(a.support_edges, b.support_edges);
 }
+
+// ---------------------------------------------------------------------------
+// Certified floor (Task 4a fix-round): a rigorous CPU-f64 lower bound on the
+// (unscaled, mass-1) matching optimum via a repaired feasible dual. Valid for
+// ANY input dual `y` (feasibility is reconstructed), tight when `y` is good.
+// Masses are the H3-scaled values (rider_mass = cab_cap = 1/nt).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn certified_floor_is_valid_lower_bound() {
+    let mut rng = fastrand::Rng::with_seed(41);
+    for trial in 0..20 {
+        let ns = 2 + trial % 5; // 2..=6
+        let riders = random_points(ns, &mut rng);
+        let cabs = random_points(ns + 2, &mut rng);
+        let nt = cabs.len();
+        let m = 1.0 / nt as f64;
+        let bf = brute_force_min_cost(&riders, &cabs);
+        // (i) the solver's dual
+        let sol = solve_scaled(&riders, &cabs);
+        let f_solved = recover::certified_floor(&sol.y, &riders, &cabs, m, m);
+        // (ii) an all-zero dual
+        let f_zero = recover::certified_floor(&vec![0.0; ns + nt], &riders, &cabs, m, m);
+        // (iii) a garbage dual (feasibility-by-construction must still hold)
+        let garbage: Vec<f64> = (0..ns + nt).map(|_| rng.f64() * 20.0 - 10.0).collect();
+        let f_garbage = recover::certified_floor(&garbage, &riders, &cabs, m, m);
+        for (label, f) in [
+            ("solved", f_solved),
+            ("zero", f_zero),
+            ("garbage", f_garbage),
+        ] {
+            assert!(
+                f <= bf + 1e-9 * (1.0 + bf.abs()),
+                "trial {trial} {label}: floor {f} exceeds optimum {bf}",
+            );
+        }
+    }
+}
+
+#[test]
+fn certified_floor_is_nearly_tight() {
+    let mut rng = fastrand::Rng::with_seed(43);
+    for trial in 0..5 {
+        let riders = random_points(3 + trial, &mut rng); // 3..=7
+        let cabs = random_points(8, &mut rng);
+        let nt = cabs.len();
+        let m = 1.0 / nt as f64;
+        let sol = solve_scaled(&riders, &cabs);
+        assert_eq!(sol.status, SolveStatus::Optimal, "trial {trial}");
+        let bf = brute_force_min_cost(&riders, &cabs);
+        let floor = recover::certified_floor(&sol.y, &riders, &cabs, m, m);
+        assert!(
+            floor <= bf + 1e-9 * (1.0 + bf.abs()),
+            "trial {trial}: floor {floor} exceeds optimum {bf}",
+        );
+        assert!(
+            floor >= bf - 1e-3 * (1.0 + bf.abs()),
+            "trial {trial}: floor {floor} not tight vs optimum {bf}",
+        );
+    }
+}
+
+#[test]
+fn certified_floor_is_deterministic() {
+    let mut rng = fastrand::Rng::with_seed(47);
+    let riders = random_points(6, &mut rng);
+    let cabs = random_points(8, &mut rng);
+    let nt = cabs.len();
+    let m = 1.0 / nt as f64;
+    let sol = solve_scaled(&riders, &cabs);
+    let a = recover::certified_floor(&sol.y, &riders, &cabs, m, m);
+    let b = recover::certified_floor(&sol.y, &riders, &cabs, m, m);
+    assert_eq!(a, b);
+}
