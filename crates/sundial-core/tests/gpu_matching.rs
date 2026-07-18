@@ -89,7 +89,7 @@ fn gpu_matches_manhattan_fixture_to_1e4() {
     // independent of solver tolerance (unlike the tolerance-dependent readout
     // `dual_obj × nt`, which overshoots at tol 1e-4; see task-4a-report.md).
     // Both `certified_floor` and `total_cost` are in unscaled coordinate units.
-    let mass = 1.0 / nt as f64; // H3 scaling: rider_mass = cab_cap = 1/nt
+    let mass = transport::matching_mass(nt); // H3 scaling: rider_mass = cab_cap = 1/nt
     let t0 = std::time::Instant::now();
     let cf = recover::certified_floor_ascent(
         &sol.y,

@@ -17,3 +17,9 @@ export interface TransportPreview {
   src: number[];
   tgt: number[];
 }
+export interface MatchResult extends SundialResult {
+  assignment: number[]; // per-rider assigned cab (integral, injective, crossing-free)
+  total_cost: number; // recovered matching total distance, coordinate units
+  certified_floor: number; // rigorous lower bound on any dispatch, coordinate units
+  support_edges: number;
+}

@@ -228,6 +228,14 @@ pub fn problem_from_masses(
     )
 }
 
+/// The H3 mass-scaling factor (`1/nt`) shared by `problem_from_points` and its
+/// callers that need to interpret the solver's scaled duals/plan in the same
+/// units (e.g. `recover::certified_floor`) — a single source of truth so the
+/// scaling can't drift out of sync between the problem builder and its callers.
+pub fn matching_mass(nt: usize) -> f64 {
+    1.0 / nt as f64
+}
+
 /// Capacitated point matching (taxi demo): riders are sources that must be
 /// served exactly once; cabs are sinks with capacity ≤ 1. c is plain Euclidean
 /// distance, so the objective is total pickup distance (in the callers'
@@ -274,7 +282,7 @@ pub fn problem_from_points(
     // capacity [0, 1/nt]. Uniform per-side, so the transport structure — and
     // hence the recovered matching — is unchanged; only the primal-weight seed
     // moves into its useful regime.
-    let mass = 1.0 / nt as f64;
+    let mass = matching_mass(nt);
     let mut row_lower = vec![mass; ns];
     row_lower.extend(std::iter::repeat_n(0.0, nt));
     let mut row_upper = vec![mass; ns];

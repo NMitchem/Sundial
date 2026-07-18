@@ -8,6 +8,7 @@ use serde::Serialize;
 use sundial_core::gpu::op::TransportGpuOp;
 use sundial_core::gpu::{engine, GpuContext};
 use sundial_core::problem::{ProgressEvent, SnapshotEvent, Solution, SolveOptions, SolveStatus};
+use sundial_core::recover;
 use sundial_core::transport::{self, Preset};
 use wasm_bindgen::prelude::*;
 
@@ -25,8 +26,8 @@ struct WasmResult {
     n_vars: u64,
 }
 
-fn to_result(sol: &Solution, adapter: &str, n_vars: usize) -> Result<JsValue, JsValue> {
-    let out = WasmResult {
+fn make_result(sol: &Solution, adapter: &str, n_vars: usize) -> WasmResult {
+    WasmResult {
         status: match sol.status {
             SolveStatus::Optimal => "Optimal (CPU f64 verified)".into(),
             other => format!("{other:?}"),
@@ -40,8 +41,12 @@ fn to_result(sol: &Solution, adapter: &str, n_vars: usize) -> Result<JsValue, Js
         rel_gap: sol.stats.verified.rel_gap,
         adapter: adapter.to_string(),
         n_vars: n_vars as u64,
-    };
-    serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+}
+
+fn to_result(sol: &Solution, adapter: &str, n_vars: usize) -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(&make_result(sol, adapter, n_vars))
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 fn progress_cb(on_progress: Function) -> impl FnMut(ProgressEvent) {
@@ -178,6 +183,69 @@ pub async fn solve_transport_custom(
         .await
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     to_result(&sol, &ctx.adapter_name, p.n_vars())
+}
+
+#[derive(Serialize)]
+struct MatchResult {
+    #[serde(flatten)]
+    base: WasmResult,
+    /// Per-rider assigned cab (integral recovery from the LP plan's support:
+    /// min-cost matching + uncrossing — injective and crossing-free).
+    assignment: Vec<u32>,
+    /// Total pickup distance of the recovered matching, coordinate units.
+    total_cost: f64,
+    /// Rigorous lower bound on ANY dispatch's total (repaired-dual weak
+    /// duality + ascent) — display copy derives measured slack from this.
+    certified_floor: f64,
+    support_edges: u32,
+}
+
+/// Solve a rider→cab matching on the browser's GPU (taxi demo). riderXY and
+/// cabXY are flat [x0,y0,x1,y1,…] in any consistent planar unit.
+#[wasm_bindgen(js_name = solveMatching)]
+pub async fn solve_matching(
+    rider_xy: Vec<f32>,
+    cab_xy: Vec<f32>,
+    tol: f64,
+    on_progress: Function,
+) -> Result<JsValue, JsValue> {
+    console_error_panic_hook::set_once();
+    if !rider_xy.len().is_multiple_of(2) || !cab_xy.len().is_multiple_of(2) {
+        return Err(JsValue::from_str("coordinate arrays must be [x,y] pairs"));
+    }
+    let to_pts = |v: &[f32]| -> Vec<[f64; 2]> {
+        v.chunks_exact(2)
+            .map(|p| [p[0] as f64, p[1] as f64])
+            .collect()
+    };
+    let (riders, cabs) = (to_pts(&rider_xy), to_pts(&cab_xy));
+    let p = transport::problem_from_points(&riders, &cabs)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let ctx = GpuContext::new()
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let opts = SolveOptions {
+        tol,
+        max_iters: 500_000,
+        ..Default::default()
+    };
+    let gop = TransportGpuOp::new(&ctx.device, riders.len(), cabs.len());
+    let mut cb = progress_cb(on_progress);
+    let n_vars = p.n_vars();
+    let sol = engine::solve_gpu_op(&ctx, &p, &gop, &opts, &mut cb, None)
+        .await
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let rec = recover::recover_matching(&sol.x, &riders, &cabs);
+    let mass = transport::matching_mass(cabs.len());
+    let floor = recover::certified_floor(&sol.y, &riders, &cabs, mass, mass);
+    let out = MatchResult {
+        base: make_result(&sol, &ctx.adapter_name, n_vars),
+        assignment: rec.assignment,
+        total_cost: rec.total_cost,
+        certified_floor: floor,
+        support_edges: rec.support_edges as u32,
+    };
+    serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Solve raw MPS bytes (plain or gzip) — the drop-a-file bench page path.
