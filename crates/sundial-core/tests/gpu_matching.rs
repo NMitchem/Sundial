@@ -130,4 +130,16 @@ fn gpu_matches_manhattan_fixture_to_1e4() {
          scaling/sign bug in certified_floor",
         rec.total_cost,
     );
+
+    // Regression bound on relative slack, set from the measured fix-round-2
+    // value (slack/total_cost = 1968.9 ft / 8.676982 units ≈ 0.345%) with ~1.4×
+    // headroom. A breach means the certified floor or the recovery REGRESSED
+    // (floor loosened / recovery worsened) — it is NOT a signal to raise the
+    // bound. (Recorded 2026-07-18.)
+    assert!(
+        slack / rec.total_cost <= 5e-3,
+        "relative slack {} exceeds the 5e-3 regression bound (slack {slack_feet:.1} ft): \
+         certified floor or recovery regressed",
+        slack / rec.total_cost,
+    );
 }
