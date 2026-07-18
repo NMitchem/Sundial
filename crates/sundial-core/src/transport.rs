@@ -270,6 +270,28 @@ pub fn problem_from_points(
     )
 }
 
+/// Per-rider dominant cab from a solved matching plan: argmax_j x[i·nt+j],
+/// plus the smallest dominant mass over riders. With generic (distinct)
+/// costs the transportation polytope's optimum is integral, so masses sit
+/// near 1.0; ties or loose tolerance can split them. Display code gates its
+/// "every route" claims on that returned minimum — never asserted here.
+pub fn dominant_assignment(x: &[f64], ns: usize, nt: usize) -> (Vec<u32>, f64) {
+    assert_eq!(x.len(), ns * nt, "plan length must be ns·nt");
+    let mut assign = Vec::with_capacity(ns);
+    let mut min_mass = f64::INFINITY;
+    for i in 0..ns {
+        let (mut jmax, mut vmax) = (0usize, f64::NEG_INFINITY);
+        for (j, &v) in x[i * nt..(i + 1) * nt].iter().enumerate() {
+            if v > vmax {
+                (jmax, vmax) = (j, v);
+            }
+        }
+        assign.push(jmax as u32);
+        min_mass = min_mass.min(vmax);
+    }
+    (assign, min_mass)
+}
+
 /// Explicit CSR twin of `TransportOp` — TEST ORACLE ONLY (dense in memory
 /// at O(ns·nt) nonzeros; never build at hero scale).
 pub fn explicit_csr(ns: usize, nt: usize) -> CsrMatrix {

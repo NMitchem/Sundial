@@ -116,3 +116,55 @@ fn reference_solve_matches_brute_force() {
         );
     }
 }
+
+#[test]
+fn dominant_assignment_recovers_permutation() {
+    let mut rng = fastrand::Rng::with_seed(11);
+    let riders = random_points(6, &mut rng);
+    let cabs = random_points(8, &mut rng);
+    let p = transport::problem_from_points(&riders, &cabs).unwrap();
+    let opts = SolveOptions {
+        tol: 1e-7,
+        max_iters: 2_000_000,
+        ..Default::default()
+    };
+    let sol = reference::solve_op(&p, &opts, &mut |_e| {});
+    assert_eq!(sol.status, SolveStatus::Optimal);
+    let (assign, min_mass) = transport::dominant_assignment(&sol.x, 6, 8);
+    assert_eq!(assign.len(), 6);
+    let distinct: std::collections::HashSet<u32> = assign.iter().copied().collect();
+    assert_eq!(distinct.len(), 6, "optimal matching must be injective");
+    assert!(
+        min_mass > 0.9,
+        "generic costs ⇒ integral optimum, got {min_mass}"
+    );
+    // the extracted assignment reproduces the LP objective
+    let total: f64 = assign
+        .iter()
+        .enumerate()
+        .map(|(i, &j)| dist(riders[i], cabs[j as usize]))
+        .sum();
+    assert!(
+        (total - sol.primal_obj).abs() <= 1e-4 * (1.0 + sol.primal_obj.abs()),
+        "assignment total {total} vs objective {}",
+        sol.primal_obj
+    );
+}
+
+#[test]
+fn dominant_assignment_survives_ties() {
+    // one rider exactly between two cabs: the optimal face may be fractional;
+    // extraction must stay total (no panic) and report the weak dominance.
+    let riders = vec![[0.5, 0.5]];
+    let cabs = vec![[0.0, 0.5], [1.0, 0.5]];
+    let p = transport::problem_from_points(&riders, &cabs).unwrap();
+    let opts = SolveOptions {
+        tol: 1e-7,
+        max_iters: 2_000_000,
+        ..Default::default()
+    };
+    let sol = reference::solve_op(&p, &opts, &mut |_e| {});
+    let (assign, min_mass) = transport::dominant_assignment(&sol.x, 1, 2);
+    assert!(assign[0] == 0 || assign[0] == 1);
+    assert!(min_mass > 0.4, "tie may split ~50/50, got {min_mass}");
+}
