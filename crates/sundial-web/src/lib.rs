@@ -187,8 +187,21 @@ pub async fn solve_transport_custom(
 
 #[derive(Serialize)]
 struct MatchResult {
-    #[serde(flatten)]
-    base: WasmResult,
+    // WasmResult fields listed FLAT — #[serde(flatten)] would route through
+    // serialize_map, which serde_wasm_bindgen turns into an ES6 Map instead
+    // of a plain object, silently breaking result.field access in JS
+    // (Task 5 review finding). Flat fields ride the proven serialize_struct
+    // path the four existing entry points use.
+    status: String,
+    objective: f64,
+    iterations: u64,
+    restarts: u32,
+    solve_ms: f64,
+    rel_primal: f64,
+    rel_dual: f64,
+    rel_gap: f64,
+    adapter: String,
+    n_vars: u64,
     /// Per-rider assigned cab (integral recovery from the LP plan's support:
     /// min-cost matching + uncrossing — injective and crossing-free).
     assignment: Vec<u32>,
@@ -238,8 +251,18 @@ pub async fn solve_matching(
     let rec = recover::recover_matching(&sol.x, &riders, &cabs);
     let mass = transport::matching_mass(cabs.len());
     let floor = recover::certified_floor(&sol.y, &riders, &cabs, mass, mass);
+    let base = make_result(&sol, &ctx.adapter_name, n_vars);
     let out = MatchResult {
-        base: make_result(&sol, &ctx.adapter_name, n_vars),
+        status: base.status,
+        objective: base.objective,
+        iterations: base.iterations,
+        restarts: base.restarts,
+        solve_ms: base.solve_ms,
+        rel_primal: base.rel_primal,
+        rel_dual: base.rel_dual,
+        rel_gap: base.rel_gap,
+        adapter: base.adapter,
+        n_vars: base.n_vars,
         assignment: rec.assignment,
         total_cost: rec.total_cost,
         certified_floor: floor,
