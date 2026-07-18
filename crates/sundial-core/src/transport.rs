@@ -228,6 +228,48 @@ pub fn problem_from_masses(
     )
 }
 
+/// Capacitated point matching (taxi demo): riders are sources that must be
+/// served exactly once (row = [1, 1]); cabs are sinks with capacity ≤ 1
+/// (row = [0, 1]). c is plain Euclidean distance, so the objective is total
+/// pickup distance in the callers' coordinate units. Requires cabs ≥ riders;
+/// feasible by construction (assign each rider any distinct cab).
+pub fn problem_from_points(
+    riders: &[[f64; 2]],
+    cabs: &[[f64; 2]],
+) -> Result<OpProblem<TransportOp>, ProblemError> {
+    let (ns, nt) = (riders.len(), cabs.len());
+    if ns == 0 || nt < ns {
+        return Err(ProblemError::Dimension(format!(
+            "need 1 ≤ riders ≤ cabs, got {ns} riders and {nt} cabs"
+        )));
+    }
+    if riders.iter().chain(cabs).flatten().any(|v| !v.is_finite()) {
+        return Err(ProblemError::Dimension(
+            "coordinates must be finite".to_string(),
+        ));
+    }
+    let mut c = vec![0.0; ns * nt];
+    for (i, r) in riders.iter().enumerate() {
+        for (j, k) in cabs.iter().enumerate() {
+            c[i * nt + j] = ((r[0] - k[0]).powi(2) + (r[1] - k[1]).powi(2)).sqrt();
+        }
+    }
+    let mut row_lower = vec![1.0; ns];
+    row_lower.extend(std::iter::repeat_n(0.0, nt));
+    let mut row_upper = vec![1.0; ns];
+    row_upper.extend(std::iter::repeat_n(1.0, nt));
+    OpProblem::new(
+        format!("matching-{ns}x{nt}"),
+        TransportOp { ns, nt },
+        c,
+        0.0,
+        row_lower,
+        row_upper,
+        vec![0.0; ns * nt],
+        vec![f64::INFINITY; ns * nt],
+    )
+}
+
 /// Explicit CSR twin of `TransportOp` — TEST ORACLE ONLY (dense in memory
 /// at O(ns·nt) nonzeros; never build at hero scale).
 pub fn explicit_csr(ns: usize, nt: usize) -> CsrMatrix {
