@@ -229,10 +229,26 @@ pub fn problem_from_masses(
 }
 
 /// Capacitated point matching (taxi demo): riders are sources that must be
-/// served exactly once (row = [1, 1]); cabs are sinks with capacity ≤ 1
-/// (row = [0, 1]). c is plain Euclidean distance, so the objective is total
-/// pickup distance in the callers' coordinate units. Requires cabs ≥ riders;
-/// feasible by construction (assign each rider any distinct cab).
+/// served exactly once; cabs are sinks with capacity ≤ 1. c is plain Euclidean
+/// distance, so the objective is total pickup distance (in the callers'
+/// coordinate units) scaled by `1/nt` — recover physical units via `× nt`.
+/// Requires cabs ≥ riders; feasible by construction (assign each rider any
+/// distinct cab).
+///
+/// **Masses are scaled by `1/nt`** (rider equality mass `1/nt`, cab capacity
+/// `[0, 1/nt]`) rather than the natural `[1,1]/[0,1]`. This is a convergence
+/// fix, not a cosmetic one — see `.superpowers/sdd/task-4-report.md`
+/// Investigation (H3, measured). PDLP seeds its primal weight
+/// `ω₀ = ‖c‖/‖q‖`; the rhs norm `q_norm = √(ns+nt)` at unit masses leaves
+/// `ω₀ ≈ 13`, far below its `1e4` clamp, so the dual side is under-driven and
+/// the duality gap plateaus at ~2.5e-4 (the full-scale fixture terminated
+/// `IterationLimit` at 500k iters). Shrinking every mass by `1/nt` shrinks
+/// `q_norm` by the same factor, lifting `ω₀` into the `1e4` clamp and driving
+/// the dual hard; the gap then closes and the fixture certifies `Optimal`
+/// (CPU f64: 4,288 iters full scale; GPU ~6 s). The scaling multiplies the LP
+/// objective by `1/nt` and shrinks the optimal `x` by `1/nt`, so the extracted
+/// matching cost in coordinate units is `primal_obj × nt` (and the certified
+/// dual floor is `dual_obj × nt`).
 pub fn problem_from_points(
     riders: &[[f64; 2]],
     cabs: &[[f64; 2]],
@@ -254,10 +270,15 @@ pub fn problem_from_points(
             c[i * nt + j] = ((r[0] - k[0]).powi(2) + (r[1] - k[1]).powi(2)).sqrt();
         }
     }
-    let mut row_lower = vec![1.0; ns];
+    // H3 mass scaling (see doc comment): rider equality mass 1/nt, cab
+    // capacity [0, 1/nt]. Uniform per-side, so the transport structure — and
+    // hence the recovered matching — is unchanged; only the primal-weight seed
+    // moves into its useful regime.
+    let mass = 1.0 / nt as f64;
+    let mut row_lower = vec![mass; ns];
     row_lower.extend(std::iter::repeat_n(0.0, nt));
-    let mut row_upper = vec![1.0; ns];
-    row_upper.extend(std::iter::repeat_n(1.0, nt));
+    let mut row_upper = vec![mass; ns];
+    row_upper.extend(std::iter::repeat_n(mass, nt));
     OpProblem::new(
         format!("matching-{ns}x{nt}"),
         TransportOp { ns, nt },
@@ -271,10 +292,17 @@ pub fn problem_from_points(
 }
 
 /// Per-rider dominant cab from a solved matching plan: argmax_j x[i·nt+j],
-/// plus the smallest dominant mass over riders. With generic (distinct)
-/// costs the transportation polytope's optimum is integral, so masses sit
-/// near 1.0; ties or loose tolerance can split them. Display code gates its
-/// "every route" claims on that returned minimum — never asserted here.
+/// plus the smallest dominant mass over riders (a fraction of the `1/nt` row
+/// mass under the H3 scaling, so a crisp assignment reports `~1/nt`, not 1).
+///
+/// **Diagnostics only — superseded for demo display by `recover::recover_matching`.**
+/// On the dense real fixture the optimal face is high-dimensional (real-data
+/// ties + 4-decimal rounding ⇒ hundreds of near-equidistant riders), so the
+/// objective-converged fractional plan is *not* crisp per-rider (only ~88/1024
+/// riders are single-cab; see task-4-report.md Investigation). Argmax therefore
+/// does not read off a valid injective matching at scale; use it only as a
+/// per-rider dominance diagnostic. `recover_matching` produces the shippable
+/// assignment.
 pub fn dominant_assignment(x: &[f64], ns: usize, nt: usize) -> (Vec<u32>, f64) {
     assert_eq!(x.len(), ns * nt, "plan length must be ns·nt");
     let mut assign = Vec::with_capacity(ns);

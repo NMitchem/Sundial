@@ -991,6 +991,7 @@ dependencies = [
  "futures-channel",
  "pollster",
  "serde",
+ "serde_json",
  "sundial-mps",
  "thiserror",
  "web-time",
