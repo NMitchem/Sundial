@@ -16,16 +16,18 @@ Updated: 2026-07-14 (M2 closed — browser human gate passed; launch-ready, unpu
 
 `web/taxi.html`: 1,024 real TLC riders × 1,152 cabs (2015-06 slice, the last
 public data with exact GPS) solved as a capacitated matching over the existing
-matrix-free `TransportOp` — new surface is only `problem_from_points`,
-`dominant_assignment`, and the `solveMatching` wasm entry; engine/shaders
-untouched. Native gate (`gpu_matching`, --release): Optimal in 4,288 iters /
-2,619 ms; recovered plan 8.676982 units vs certified floor 8.647033 (slack
-1968.9 ft, ~1.9 ft/pickup). Browser (Chrome/Metal, M4 Pro): ~2.2–2.5 s per
-solve; greedy nearest-neighbor dispatch measured 25% worse than optimal on
-the fixture. Honesty: "proven optimal" copy is gated on CPU-f64 verified
-status AND certified-floor slack ≤ 5e-3 of total (the recovery contract —
-the dual-repair floor, not a dominance readout); free-cab positions are a
-drop-off proxy (disclosed on-page); distances are straight-line.
+matrix-free `TransportOp` — new surface is only `problem_from_points`, the
+`recover` module (integral matching recovery + certified dual floor), and the
+`solveMatching` wasm entry (`dominant_assignment` is test-only, superseded by
+recovery); engine/shaders untouched. Native gate (`gpu_matching`, --release):
+Optimal in 4,288 iters / 2,619 ms; recovered plan 8.676982 units vs certified
+floor 8.647033 (slack 1968.9 ft, ~1.9 ft/pickup). Browser (Chrome/Metal, M4
+Pro): ~2.2–2.5 s per solve; greedy nearest-neighbor dispatch measured 25%
+worse than optimal on the fixture. Honesty: "proven optimal" copy is gated
+on CPU-f64 verified status AND certified-floor slack ≤ 5e-3 of total (the
+recovery contract — the dual-repair floor, not a dominance readout); free-cab
+positions are a drop-off proxy (disclosed on-page); distances are
+straight-line.
 loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 
 ## M2 results (verified on Apple M4 Pro / Metal, 2026-07-10)

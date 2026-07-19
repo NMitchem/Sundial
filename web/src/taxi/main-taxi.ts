@@ -34,6 +34,7 @@ const pairs = (n: number) => (n * (n - 1)) / 2;
 class Demo {
   private riders: Pt[];
   private greedy!: Uint32Array;
+  private greedyMiles = 0;
   private optimal: Uint32Array | null = null;
   private busy = false;
   private pendingTap: Pt | null = null;
@@ -54,6 +55,7 @@ class Demo {
 
     this.greedy = greedyAssign(this.riders, this.pts.cabs);
     const gm = totalMiles(this.riders, this.pts.cabs, this.greedy, this.pts.miles_per_unit);
+    this.greedyMiles = gm;
     $("phase").textContent =
       "The obvious way — every rider grabs the nearest free cab. Look at the mess.";
     await animate(900, (t) =>
@@ -72,29 +74,14 @@ class Demo {
       return;
     }
 
-    const { certified, slackFeet } = this.certify(res);
+    const { certified } = this.certify(res);
     this.optimal = Uint32Array.from(res.assignment);
     const om = res.total_cost * this.pts.miles_per_unit;
     await animate(900, (t) =>
       this.lines.draw({ from: this.greedy, to: this.optimal!, t: ease(t), color: GREEN }),
     );
     await rollNumber($("miles"), gm, om, 700, " total pickup miles");
-    const pct = ((gm - om) / gm) * 100;
-    if (certified) {
-      const perPickup = slackFeet / this.riders.length;
-      $("phase").textContent =
-        `${om.toFixed(0)} miles — ${pct.toFixed(0)}% less driving than the obvious way. ` +
-        `Proven: no dispatch on Earth beats this by more than ${perPickup.toFixed(1)} ft per pickup.`;
-      $("dare").textContent =
-        `${pairs(this.riders.length).toLocaleString()} pairs of green routes on screen. Find two that cross. You won't.`;
-      $("banner").textContent = "";
-    } else {
-      $("phase").textContent =
-        `Best routing found: ${om.toFixed(0)} miles — ${pct.toFixed(0)}% less than the obvious way.`;
-      $("banner").textContent =
-        "This run stopped before certification — showing the best routing found, not a proven optimum.";
-      $("dare").textContent = "";
-    }
+    this.renderVerdict(res);
     this.receipts(res, certified);
     $("poke-hint").textContent = "Tap anywhere in Manhattan — you need a cab.";
     this.busy = false;
@@ -123,6 +110,8 @@ class Demo {
     try {
       res = await this.solve();
     } catch (err) {
+      this.riders = this.riders.slice(0, -1); // undo this poke's append — last-good state
+      this.pendingTap = null; // queued tap intentionally dropped on failure; Retry rebuilds from current riders
       this.fail(err);
       return;
     }
@@ -138,6 +127,7 @@ class Demo {
     $("miles").textContent = `${om.toFixed(0)} total pickup miles`;
     $("poke-hint").textContent =
       `Your cab is on its way. Your single tap re-routed ${changed.size.toLocaleString()} other pickups. Tap again.`;
+    this.renderVerdict(res);
     this.receipts(res, certified);
     this.busy = false;
     if (this.pendingTap) {
@@ -160,6 +150,30 @@ class Demo {
       $("receipts").textContent =
         `iteration ${e.iter.toLocaleString()} · gap ${e.rel_gap.toExponential(1)} · ${e.ms_per_iter.toFixed(2)} ms/iter`;
     }) as Promise<MatchResult>;
+  }
+
+  /** Re-gates the certified headline (#phase) and dare (#dare) from the latest
+   *  solve — called after every solve, first dispatch or poke re-solve alike,
+   *  so an uncertified re-solve can't leave a stale "Proven" claim on screen. */
+  private renderVerdict(res: MatchResult) {
+    const { certified, slackFeet } = this.certify(res);
+    const om = res.total_cost * this.pts.miles_per_unit;
+    const pct = ((this.greedyMiles - om) / this.greedyMiles) * 100;
+    if (certified) {
+      const perPickup = slackFeet / this.riders.length;
+      $("phase").textContent =
+        `${om.toFixed(0)} miles — ${pct.toFixed(0)}% less driving than the obvious way. ` +
+        `Proven: no dispatch on Earth beats this by more than ${perPickup.toFixed(1)} ft per pickup.`;
+      $("dare").textContent =
+        `${pairs(this.riders.length).toLocaleString()} pairs of green routes on screen. Find two that cross. You won't.`;
+      $("banner").textContent = "";
+    } else {
+      $("phase").textContent =
+        `Best routing found: ${om.toFixed(0)} miles — ${pct.toFixed(0)}% less than the obvious way.`;
+      $("banner").textContent =
+        "This run stopped before certification — showing the best routing found, not a proven optimum.";
+      $("dare").textContent = "";
+    }
   }
 
   /** Honesty gate: LP certificate + measured slack over the rigorous floor
