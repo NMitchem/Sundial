@@ -10,6 +10,24 @@ Updated: 2026-07-14 (M2 closed — browser human gate passed; launch-ready, unpu
 
 **Launch bar** (from spec): hero ≥1M vars → 1e-4 interactive on a MacBook; ≥25 Netlib + ≥5 large instances in the table; `npm install` works; writeup done. **Met** — sweep table now covers 32/32 netlib instances (20 Optimal + 12 honest IterationLimit, 0 parse errors), all of them small/medium classic-Netlib; the ≥5-large-instance bar is met by the 1M-variable transport hero, reported separately (M1/M2 results below, `docs/writeup.md`), not by additional rows in that table; `sundial-lp` packs cleanly via `npm pack` (never published — see M2 results); `docs/writeup.md` is a complete Show HN draft with `<DEMO_URL>` as its sole unfilled placeholder.
 
+## M3 (in progress)
+
+### 2026-07-19 — Taxi demo (M3 seed): Manhattan matching page
+
+`web/taxi.html`: 1,024 real TLC riders × 1,152 cabs (2015-06 slice, the last
+public data with exact GPS) solved as a capacitated matching over the existing
+matrix-free `TransportOp` — new surface is only `problem_from_points`,
+`dominant_assignment`, and the `solveMatching` wasm entry; engine/shaders
+untouched. Native gate (`gpu_matching`, --release): Optimal in 4,288 iters /
+2,619 ms; recovered plan 8.676982 units vs certified floor 8.647033 (slack
+1968.9 ft, ~1.9 ft/pickup). Browser (Chrome/Metal, M4 Pro): ~2.2–2.5 s per
+solve; greedy nearest-neighbor dispatch measured 25% worse than optimal on
+the fixture. Honesty: "proven optimal" copy is gated on CPU-f64 verified
+status AND certified-floor slack ≤ 5e-3 of total (the recovery contract —
+the dual-repair floor, not a dominance readout); free-cab positions are a
+drop-off proxy (disclosed on-page); distances are straight-line.
+loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
+
 ## M2 results (verified on Apple M4 Pro / Metal, 2026-07-10)
 
 - **Netlib sweep refresh** (Tasks 1–2, 11): parser now accepts set-name-less RHS lines (real-world netlib corner) and the `up_negative` flag resets correctly on repeated `UP` lines for the same column. blend.mps, previously a parse error, now solves **Optimal (−30.8119660669, 7,488 iters, 1.1 s)** against optima-file value −30.812149846 (gap within verified mu 9.98e-5). Full sweep: **20/32 Optimal, 12 IterationLimit (honest f32 wall), 0 parse errors** (was 19/32 + 1 parse error at M1). e226's sign-convention footnote (docs/writeup.md, README) still applies and is unchanged by this refresh.

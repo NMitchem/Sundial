@@ -38,6 +38,10 @@ source/target masses, and the solver ships as an npm package, `sundial-lp`
     #   -> index.html  (transport hero: 5 presets + draw-your-own, grid picker, live heatmaps + convergence chart)
     #   -> bench.html  (drop a .mps / .mps.gz file, get an honest results table)
 
+- `taxi.html` — every open ride in Manhattan (real 2015 TLC data), dispatched
+  greedily and then to a CPU-verified optimum on your GPU; tap to add yourself
+  and watch the city re-plan.
+
 ## As a library (npm)
 
     npm install sundial-lp   # not yet published — see RELEASE.md
