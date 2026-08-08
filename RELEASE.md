@@ -127,6 +127,39 @@ you.
   Confirm the `import init, { solveMps } from "sundial-lp"` snippet in the
   writeup matches the actual exported API (init function + `solveMps`).
 
+## 4b. Publish the Rust crates (crates.io)
+
+This is what makes the project findable by Rust users at all — crates.io and
+docs.rs are where they look, and docs.rs pages rank in search. All four crates
+carry `description`, `keywords`, `categories`, `readme`, and `repository`.
+
+**Order matters — each crate must exist on the index before its dependents can
+be published.** Until `sundial-core` is up, a dry run of the others fails with
+`no matching package named 'sundial-core' found`; that is expected, not a
+manifest bug.
+
+```bash
+cargo publish -p sundial-core     # no path deps; publish first
+cargo publish -p sundial-mps      # depends on sundial-core
+cargo publish -p sundial-cli      # depends on both
+cargo publish -p sundial-lp       # optional; the npm package is its real home
+```
+
+- [ ] Dry-run `sundial-core` first and read the file list:
+  ```bash
+  cargo publish -p sundial-core --dry-run
+  cargo package -p sundial-core --list | head -40
+  ```
+- [ ] Publish in the order above, waiting for each to appear on the index
+  before the next.
+- [ ] Confirm docs.rs built each crate (it can take a few minutes) and that the
+  landing page shows the README rather than a bare module list.
+- [ ] `cargo install sundial-cli` in a clean environment and run
+  `sundial solve` on a fixture.
+
+Names are unclaimed as of this writing — verify with `cargo search sundial-core`
+before you count on them.
+
 ## 5. Fill the demo URL into the writeup
 
 - [ ] Replace **every** `<DEMO_URL>` in `docs/writeup.md` with the real URL from

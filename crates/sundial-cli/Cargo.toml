@@ -2,7 +2,13 @@
 name = "sundial-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Command-line interface for Sundial: solve MPS files on the GPU, generate optimal-transport instances, benchmark, and report."
+readme = "README.md"
+keywords = ["linear-programming", "optimization", "solver", "gpu", "cli"]
+categories = ["command-line-utilities", "science", "mathematics"]
 
 [[bin]]
 name = "sundial"

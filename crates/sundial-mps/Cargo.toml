@@ -2,7 +2,13 @@
 name = "sundial-mps"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Parser for the MPS linear-programming file format, plain or gzipped. Pure parser — no GPU or wasm dependencies."
+readme = "README.md"
+keywords = ["mps", "linear-programming", "parser", "optimization", "lp"]
+categories = ["parser-implementations", "science", "mathematics"]
 
 [dependencies]
 sundial-core.workspace = true

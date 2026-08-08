@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::collections::HashMap;
 use std::io::Read;
 use sundial_core::problem::{CsrMatrix, LpProblem};

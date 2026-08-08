@@ -2,9 +2,13 @@
 name = "sundial-lp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "GPU linear-programming solver (restarted PDHG) running as WebGPU compute shaders — in the browser, no CUDA, no server. Every Optimal is CPU-f64-verified."
 repository.workspace = true
+readme = "README.md"
+keywords = ["linear-programming", "optimization", "webgpu", "wasm", "solver"]
+categories = ["wasm", "science", "mathematics", "algorithms"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

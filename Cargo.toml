@@ -5,12 +5,15 @@ members = ["crates/sundial-core", "crates/sundial-mps", "crates/sundial-cli", "c
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+# Floor set by wgpu 30, the strictest dependency. Enforced in CI.
+rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/NMitchem/Sundial"
 
 [workspace.dependencies]
-sundial-core = { path = "crates/sundial-core" }
-sundial-mps = { path = "crates/sundial-mps" }
+# `version` is required alongside `path` for these to be publishable.
+sundial-core = { path = "crates/sundial-core", version = "0.1.0" }
+sundial-mps = { path = "crates/sundial-mps", version = "0.1.0" }
 wgpu = "30"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"

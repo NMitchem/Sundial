@@ -26,6 +26,9 @@ source/target masses, and the solver ships as an npm package, `sundial-lp`
 
 ## Try it
 
+    # smallest possible starting point: an LP you can check by hand
+    cargo run --example tiny_lp
+
     # native CLI (Metal/Vulkan/DX12 via wgpu)
     cargo run -p sundial-cli --release -- solve crates/sundial-mps/tests/fixtures/afiro.mps
 

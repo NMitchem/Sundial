@@ -2,7 +2,13 @@
 name = "sundial-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Linear-programming solver that runs on any GPU as WebGPU compute shaders — restarted PDHG (the PDLP family), with every reported status verified on the CPU in f64."
+readme = "README.md"
+keywords = ["linear-programming", "optimization", "solver", "gpu", "webgpu"]
+categories = ["science", "mathematics", "algorithms"]
 
 [dependencies]
 bytemuck.workspace = true
