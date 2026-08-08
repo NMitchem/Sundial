@@ -4,10 +4,12 @@ This is the human-run checklist to take Sundial from a local, never-published
 repo to a live Show HN. Work top to bottom; each step is a checkbox. Commands
 assume you are in the repo root on the branch you intend to ship.
 
-**Progress as of 2026-08-08:** §1 (repo created and pushed) and §2 (first CI run
-green) are done — the remote is `https://github.com/NMitchem/Sundial` and CI
-passed on ubuntu-latest in 3m20s. The repo is still **private**; flipping it to
-public is the first thing left. Everything from §3 (demo deploy) onward is
+**Progress as of 2026-08-08:** §0 is complete except the two decisions that are
+yours to make (visibility, code of conduct) — the ship branch is merged to `main`
+and `scripts/verify_clean_checkout.sh` reports ALL GREEN. §1 (repo created and
+pushed) and §2 (first CI run green) are done — the remote is
+`https://github.com/NMitchem/Sundial`. The repo is still **private**; flipping it
+to public is the first thing left. Everything from §3 (demo deploy) onward is
 unexecuted.
 
 Order matters: get the repo public and CI green first, then the demo deploy
@@ -34,11 +36,20 @@ Order matters: get the repo public and CI green first, then the demo deploy
   contributors it would document a process that doesn't exist. Add the
   Contributor Covenant with a real reporting address when you enable Discussions
   or merge a first outside PR.
-- [ ] **Merge to `main`.** Confirm the branch you're shipping is merged and the
-  tree is green locally:
+- [x] **Merge to `main`** — DONE (2026-08-08). `oss-prep` fast-forwarded into
+  `main`, and `scripts/verify_clean_checkout.sh` (fmt + workspace tests + wasm +
+  web build, from a scratch clone) reported **CLEAN CHECKOUT: ALL GREEN**. Re-run
+  it if you touch anything before publishing:
   ```bash
-  bash scripts/verify_clean_checkout.sh   # fmt + workspace tests + wasm + web build
+  bash scripts/verify_clean_checkout.sh
   ```
+- [ ] **Git history still contains the planning scaffolding.** `30afa64` removed
+  `docs/superpowers/` and `or-project-proposals.md` from the tree, but their full
+  text stays recoverable with `git show` on the ~30 commits that carried them.
+  There are no secrets in them — it is internal planning prose. Decide before the
+  repo goes public: leave it (normal for an unsquashed history), or rewrite now,
+  which is still cheap because `main` is the only pushed branch and the repo is
+  private. This is the last irreversible choice on the list.
 
 ## 1. Create the GitHub repo and push — DONE (2026-07-19)
 

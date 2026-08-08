@@ -190,11 +190,14 @@ loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 - `docs/notes/df64-experiment.md` — full df64 findings (Metal fast-math source trace, Neumaier collateral, decision gate)
 - `docs/notes/gpu-presolve-memo.md` — GPU-presolve literature memo (Cederberg & Boyd, arXiv 2604.23951) and defer rationale
 - `docs/writeup.md` — Show HN launch draft (`<DEMO_URL>` is the sole placeholder)
-- `RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); §1 (repo created, pushed) and §2 (CI green) done, everything from §3 (demo deploy) on still unexecuted
+- `CHANGELOG.md` — release-facing summary of 0.1.0 (unreleased), results and caveats attached
+- `RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); §0 (merge + clean-checkout verification), §1 (repo created, pushed) and §2 (CI green) done, everything from §3 (demo deploy) on still unexecuted
 
 ## Known gaps / notes
 
 - Remote is `https://github.com/NMitchem/Sundial` (pushed 2026-07-19). The CI workflow (`.github/workflows/ci.yml`) **has** executed on GitHub runners and passed on its first run (3m20s, ubuntu-latest) — `RELEASE.md` §1–2 are effectively done. The repo is still **private**; making it public is the outstanding step.
+- **CI now has a second job** that builds the demo the way a user would (`wasm-pack build` → `npm ci` → `tsc --noEmit` → `vite build`), closing the gap where a broken wasm binding surface or a stale `types-extra.d.ts` would have passed CI and failed only in a browser. Added 2026-08-08; verified locally, and it needs one green run on a GitHub runner to be trusted.
+- **Git history still carries the planning scaffolding.** `docs/superpowers/` and `or-project-proposals.md` were dropped from the tree in `30afa64`, but remain recoverable via `git show` on the commits that carried them. No secrets, just internal planning prose — but it becomes readable the moment the repo goes public. Rewriting is still cheap (`main` is the only pushed branch, repo private); the decision is recorded as open in `RELEASE.md` §0.
 - `npm publish` for `sundial-lp` has never been run anywhere — the package exists only as a local, inspected `.tgz` (see M2 results); publishing is a `RELEASE.md` step, not part of this milestone.
 
 ## M3 seeds (carried out of M2, for the next plan)
