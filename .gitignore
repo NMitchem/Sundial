@@ -9,3 +9,4 @@ bench/
 /results-*.csv
 /hero-*.json
 *.tgz
+.DS_Store

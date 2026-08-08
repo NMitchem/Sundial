@@ -1,10 +1,14 @@
 # RELEASE.md — Sundial publish checklist
 
 This is the human-run checklist to take Sundial from a local, never-published
-repo to a live Show HN. Nothing here has been executed — the whole M2 line was
-built "launch-ready, nothing published." Work top to bottom; each step is a
-checkbox. Commands assume you are in the repo root on the branch you intend to
-ship (merge `m2-launch-ready` to `main` first if you haven't).
+repo to a live Show HN. Work top to bottom; each step is a checkbox. Commands
+assume you are in the repo root on the branch you intend to ship.
+
+**Progress as of 2026-08-08:** §1 (repo created and pushed) and §2 (first CI run
+green) are done — the remote is `https://github.com/NMitchem/Sundial` and CI
+passed on ubuntu-latest in 3m20s. The repo is still **private**; flipping it to
+public is the first thing left. Everything from §3 (demo deploy) onward is
+unexecuted.
 
 Order matters: get the repo public and CI green first, then the demo deploy
 (you need its URL), then npm, then fill the URL into the writeup, then post.
@@ -13,58 +17,47 @@ Order matters: get the repo public and CI green first, then the demo deploy
 
 ## 0. Decisions to make before you touch anything
 
-- [ ] **Repo name.** The product, the Cargo crates, and the npm package are all
-  "sundial" (`crates/sundial-*`, package `sundial-lp`); only the local working
-  directory is `or-fable`. Recommendation: name the public GitHub repo
-  **`sundial`** so the repo, product, crates, and package all agree. If you
-  want the org/handle in front, `<you>/sundial`. Decide now — it appears in the
-  clone URL, the Pages URL, and every link in the post.
-- [ ] **Visibility.** Public. (It's a Show HN.)
-- [ ] **License is already MIT OR Apache-2.0** — confirm `LICENSE-MIT` and
-  `LICENSE-APACHE` (or equivalent) are present at the root before going public;
-  add them if missing, since `Cargo.toml` already declares the dual license.
-- [ ] **Merge to `main`.** Confirm `m2-launch-ready` is merged (or is the branch
-  you're shipping) and the tree is green locally:
+- [x] **Repo name.** Decided: **`NMitchem/Sundial`**. (The local working directory
+  is still `or-fable`; the crates and the npm package are `sundial-*` /
+  `sundial-lp`. `Cargo.toml`'s `repository` field matches the repo, capital S
+  included.)
+- [ ] **Visibility.** Public. (It's a Show HN.) **Still private — do this:**
+  ```bash
+  gh repo edit NMitchem/Sundial --visibility public
+  ```
+- [x] **License is already MIT OR Apache-2.0** — `LICENSE-MIT` and
+  `LICENSE-APACHE` confirmed present at the root, matching `Cargo.toml`.
+  `NOTICE` records the provenance of the bundled Netlib fixtures and TLC taxi
+  extract.
+- [ ] **Fill in the Code of Conduct contact.** `CODE_OF_CONDUCT.md` ships with a
+  `<CONDUCT_CONTACT>` placeholder in its Enforcement section — put a real address
+  there (or a dedicated alias, not necessarily your personal email) before the
+  repo goes public:
+  ```bash
+  grep -n '<CONDUCT_CONTACT>' CODE_OF_CONDUCT.md
+  ```
+- [ ] **Merge to `main`.** Confirm the branch you're shipping is merged and the
+  tree is green locally:
   ```bash
   bash scripts/verify_clean_checkout.sh   # fmt + workspace tests + wasm + web build
   ```
 
-## 1. Create the GitHub repo and push
+## 1. Create the GitHub repo and push — DONE (2026-07-19)
 
-- [ ] Create the empty public repo (no README/license — the repo already has
-  them):
-  ```bash
-  gh repo create sundial --public --source . --remote origin --disable-wiki
-  # or: create it in the web UI, then:
-  # git remote add origin git@github.com:<you>/sundial.git
-  ```
-- [ ] Push `main` and confirm the default branch:
-  ```bash
-  git push -u origin main
-  ```
+- [x] Repo created as `NMitchem/Sundial` (private at creation).
+- [x] `main` pushed and set as the default branch.
 
-## 2. Watch the FIRST CI run
+## 2. Watch the FIRST CI run — DONE (2026-07-19)
 
-`.github/workflows/ci.yml` has **never executed on a GitHub runner** — it's
-only ever been proven via `scripts/verify_clean_checkout.sh` locally. Expect
-the first run to need a fixup or two.
-
-- [ ] Watch it:
-  ```bash
-  gh run watch
-  ```
-- [ ] Things most likely to bite on the Ubuntu runner (none are logic bugs,
-  just environment):
-  - GPU tests are `#[ignore]`d and must stay ignored on CI — the runner has no
-    GPU. The CPU suite (`cargo test --workspace`) is what runs. Confirm the
-    ignored GPU tests are actually skipped, not attempted.
-  - `wasm-pack` install/version and the `wasm32-unknown-unknown` target must be
-    provisioned in the workflow (the local machine had them; a clean runner may
-    not). Fix the workflow, don't fix the code.
-  - macOS-only assumptions (paths, toolchain) — the local dev machine is an M4
-    Pro; CI is Linux.
-- [ ] Iterate until the badge is green. Add a CI status badge to `README.md`
-  once it passes.
+- [x] `.github/workflows/ci.yml` ran on a GitHub runner and **passed on the first
+  attempt** (ubuntu-latest, 3m20s) — none of the environment fixups anticipated
+  below were needed.
+- [ ] Add a CI status badge to `README.md`. (Deferred until the repo is public —
+  the badge image 404s on a private repo.)
+  (For the record, the things expected to bite and didn't: GPU tests staying
+  `#[ignore]`d on a GPU-less runner, `wasm-pack` / `wasm32-unknown-unknown`
+  provisioning, and macOS-only toolchain assumptions. If CI ever breaks on those,
+  fix the workflow, not the code.)
 
 ## 3. Deploy the browser demo (you need its URL for step 5)
 

@@ -1,6 +1,6 @@
 # Sundial — Project Status
 
-Updated: 2026-07-14 (M2 closed — browser human gate passed; launch-ready, unpublished)
+Updated: 2026-08-08 (M2 closed 2026-07-14; taxi demo merged 2026-07-19; repo pushed + CI green, still private and unpublished)
 
 ## Milestones
 
@@ -87,12 +87,12 @@ loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 - `docs/notes/df64-experiment.md` — full df64 findings (Metal fast-math source trace, Neumaier collateral, decision gate)
 - `docs/notes/gpu-presolve-memo.md` — GPU-presolve literature memo (Cederberg & Boyd, arXiv 2604.23951) and defer rationale
 - `docs/writeup.md` — Show HN launch draft (`<DEMO_URL>` is the sole placeholder)
-- `RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); nothing on it executed
-- `or-project-proposals.md` — the original OR project survey (Sundial plus 4 other adversarially-vetted proposals)
+- `RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); §1 (repo created, pushed) and §2 (CI green) done, everything from §3 (demo deploy) on still unexecuted
+- `docs/or-project-proposals.md` — the original OR project survey (Sundial plus 4 other adversarially-vetted proposals)
 
 ## Known gaps / notes
 
-- No GitHub remote yet — the CI workflow (`.github/workflows/ci.yml`) has never executed on GitHub runners.
+- Remote is `https://github.com/NMitchem/Sundial` (pushed 2026-07-19). The CI workflow (`.github/workflows/ci.yml`) **has** executed on GitHub runners and passed on its first run (3m20s, ubuntu-latest) — `RELEASE.md` §1–2 are effectively done. The repo is still **private**; making it public is the outstanding step.
 - Task-level execution records (briefs, implementer reports, review verdicts) were session scratch (`.superpowers/sdd/`, gitignored); their outcomes are summarized here and in the plan's adjudication commits.
 - `npm publish` for `sundial-lp` has never been run anywhere — the package exists only as a local, inspected `.tgz` (see M2 results); publishing is a `RELEASE.md` step, not part of this milestone.
 

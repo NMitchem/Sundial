@@ -6,7 +6,7 @@ members = ["crates/sundial-core", "crates/sundial-mps", "crates/sundial-cli", "c
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/noahmitchem/sundial"
+repository = "https://github.com/NMitchem/Sundial"
 
 [workspace.dependencies]
 sundial-core = { path = "crates/sundial-core" }

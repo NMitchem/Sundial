@@ -98,4 +98,21 @@ console.log(result.status, result.objective); // "Optimal (CPU f64 verified)", �
 - `crates/sundial-cli` — `sundial solve` / `sundial transport` / `sundial bench` / `sundial report`
 - `web/` — Vite + TS demo: transport hero page + benchmark page
 
-License: MIT OR Apache-2.0.
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) — it covers the build, the CI gates, and
+the invariants (certificate honesty above all) that PRs are held to. Open an issue
+before large changes; several obvious-looking improvements are already closed
+experiments documented in `docs/notes/`.
+
+Security reports go through
+[private vulnerability reporting](https://github.com/NMitchem/Sundial/security/advisories/new),
+not public issues — see [`SECURITY.md`](SECURITY.md).
+
+## License
+
+MIT OR Apache-2.0, at your option — see [`LICENSE-MIT`](LICENSE-MIT) and
+[`LICENSE-APACHE`](LICENSE-APACHE).
+
+Third-party data bundled here (the Netlib LP fixtures and the NYC TLC taxi
+extract) carries its own provenance — see [`NOTICE`](NOTICE).

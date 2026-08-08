@@ -1,0 +1,60 @@
+Sundial
+Copyright 2026 Noah Mitchem
+
+This product is licensed under either of Apache License, Version 2.0
+(LICENSE-APACHE) or MIT license (LICENSE-MIT) at your option.
+
+================================================================================
+Third-party data included in or fetched by this repository
+================================================================================
+
+The notes below record where the non-original data files in this repository came
+from. They are provenance statements, not legal advice; if you intend to
+redistribute this data yourself, verify the terms with the upstream sources.
+
+--------------------------------------------------------------------------------
+1. Netlib LP test problems
+--------------------------------------------------------------------------------
+
+Files:
+  crates/sundial-mps/tests/fixtures/{afiro,adlittle,sc50a,sc50b,share2b}.mps
+  web/public/instances/{afiro,adlittle,sc50a,sc50b,share2b}.mps
+  (also every instance fetched into the gitignored bench/ directory by
+   scripts/fetch_netlib.sh)
+
+Source: the Netlib linear-programming test set, http://www.netlib.org/lp/
+Retrieved in the compressed MPS ("emps") format and expanded with emps.c from
+http://www.netlib.org/lp/data/emps.c — see scripts/fetch_netlib.sh.
+
+The Netlib LP set is a long-standing public collection of LP benchmark problems,
+assembled by David Gay and distributed by Netlib for use in optimization
+research. Netlib does not attach an explicit license to these files; they have
+been freely redistributed in solver test suites for decades by convention. They
+are included here unmodified apart from emps decompression.
+
+Note: crates/sundial-mps/tests/fixtures/corner_bounds.mps and corner_ranges.mps
+are NOT from Netlib — they are original hand-written parser fixtures and are
+covered by this project's own license.
+
+--------------------------------------------------------------------------------
+2. NYC TLC yellow-cab trip records
+--------------------------------------------------------------------------------
+
+File: web/public/taxi/points.json (a derived extract, not the raw records)
+
+Source: New York City Taxi & Limousine Commission (TLC) trip record data for
+June 2015, published by the TLC as public data:
+https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+
+points.json contains only a derived, projected extract — 1,024 pickup points,
+1,152 drop-off points, and 20,000 basemap points, reduced to normalized 2-D
+coordinates. No trip, fare, medallion, or license identifiers are retained.
+
+Reproducibility caveat: the TLC's 2022 Parquet migration re-encoded the entire
+historical archive, including 2015, to zone IDs only, so the official host no
+longer serves the exact GPS coordinates this extract was built from.
+scripts/fetch_taxi.py therefore fetches a community-preserved mirror of the
+pre-migration file from a third-party S3 bucket
+(nyc-tlc-trip-records-pds.s3.amazonaws.com). That mirror is not operated by the
+TLC and states no redistribution terms of its own; it is used on a best-effort
+basis for reproducibility. The committed points.json is the canonical artifact.
