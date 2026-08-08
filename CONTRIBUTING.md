@@ -12,10 +12,12 @@ project, including what is deliberately unfinished and why. The design documents
 behind the architecture live in [`docs/design/`](docs/design/).
 
 For anything larger than a bug fix, **open an issue before writing code.** Several
-things that look like obvious improvements (double-double accumulation, GPU
-presolve, a movement-based primal-weight update) have already been investigated
-and deliberately deferred, with the reasoning written down in `docs/notes/`. An
-issue first saves you from re-running a closed experiment.
+things that look like obvious improvements have already been investigated and
+deliberately deferred, with the reasoning written down: double-double accumulation
+and GPU presolve in [`docs/notes/`](docs/notes/), the movement-based primal-weight
+update in [`docs/STATUS.md`](docs/STATUS.md) (it ships behind an opt-in flag, and
+the adjudication for leaving the default off is recorded there). An issue first
+saves you from re-running a closed experiment.
 
 ## Building and testing
 
@@ -58,6 +60,14 @@ cargo build -p sundial-lp --target wasm32-unknown-unknown
 cargo clippy -p sundial-lp --target wasm32-unknown-unknown -- -D warnings
 ```
 
+A second CI job builds the demo the way a user would, so a broken binding surface or a
+stale `types-extra.d.ts` fails in CI rather than in someone's browser:
+
+```bash
+wasm-pack build crates/sundial-web --target web
+cd web && npm ci && npx tsc --noEmit && npm run build
+```
+
 ## Invariants — please do not weaken these
 
 These are the design commitments the project is built on. A PR that relaxes one
@@ -88,7 +98,7 @@ will be declined even if it makes the numbers look better.
 ## Reporting culture
 
 Results in `docs/STATUS.md`, `README.md`, and `docs/writeup.md` are deliberately
-honest about limits — the f32 wall that produces `IterationLimit` rows, the 2/6
+honest about limits — the 12 `IterationLimit` rows in the Netlib sweep, the 2/6
 infeasibility recall, the e226 sign-convention footnote. When you update a number,
 **keep its caveats attached.** Never report a headline figure without its
 verification basis. If a change improves a benchmark, say what hardware and what
