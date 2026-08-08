@@ -12,3 +12,30 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build -p sundial-lp --target wasm32-unknown-unknown
       - run: cargo clippy -p sundial-lp --target wasm32-unknown-unknown -- -D warnings
+
+  # `test` proves the wasm crate compiles. This proves the artifact wasm-pack
+  # actually emits still satisfies the TypeScript demo that consumes it — a
+  # broken binding surface or a stale types-extra.d.ts fails here, not in a
+  # human's browser. Mirrors the second half of scripts/verify_clean_checkout.sh.
+  # GPU tests stay out of CI (no GPU on GitHub runners); run them locally with
+  # --include-ignored, per CONTRIBUTING.md.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "wasm32-unknown-unknown" }
+      - uses: taiki-e/install-action@v2
+        with: { tool: wasm-pack }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: wasm-pack build crates/sundial-web --target web
+      - run: npm ci
+        working-directory: web
+      - run: npx tsc --noEmit
+        working-directory: web
+      - run: npm run build
+        working-directory: web
