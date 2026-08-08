@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/NMitchem/Sundial/security/policy
+    about: Do not open a public issue. Follow the private disclosure process in SECURITY.md.
+  - name: Current project state
+    url: https://github.com/NMitchem/Sundial/blob/main/docs/STATUS.md
+    about: What is done, what is deliberately unfinished, and why. Read before filing.

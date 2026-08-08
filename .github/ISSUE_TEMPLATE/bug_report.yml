@@ -1,0 +1,60 @@
+name: Bug report
+description: A wrong answer, a crash, a parse failure, or a status Sundial should not have returned.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A **false status claim** — `Optimal`, `Infeasible`, or `Unbounded` reported for a
+        problem where it is not true — is the most serious class of bug in this project.
+        Say so explicitly if that is what you hit.
+
+        An honest `IterationLimit` on a hard instance is a known limit, not a bug; see
+        [`docs/STATUS.md`](../../docs/STATUS.md) for which instances currently do that and why.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        The exact command or code. If an MPS file is involved, attach it or name the
+        Netlib instance — "it fails on my model" is not reproducible.
+      render: shell
+    validations: { required: true }
+  - type: textarea
+    id: output
+    attributes:
+      label: Solver output
+      description: >
+        The full output, not a summary. Include the returned status, iteration count,
+        and the KKT residuals if they were printed.
+      render: shell
+    validations: { required: true }
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - GPU (native)
+        - GPU (browser / wasm)
+        - CPU f64 reference
+        - Not sure
+    validations: { required: true }
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, and GPU + backend (Metal / Vulkan / DX12) or browser + version.
+      placeholder: macOS 15.5, M4 Pro (Metal) — or Chrome 139, Windows 11 (DX12)
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Sundial version
+      description: Crate version, npm version, or the commit SHA you built from.
+    validations: { required: true }
