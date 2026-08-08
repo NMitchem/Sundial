@@ -27,6 +27,28 @@ Order matters: get the repo public and CI green first, then the demo deploy
   ```bash
   gh repo edit NMitchem/Sundial --visibility public
   ```
+- [ ] **Immediately after the flip: enable private vulnerability reporting.**
+  `SECURITY.md` tells people to report through
+  `github.com/NMitchem/Sundial/security/advisories/new`, and that link does not
+  work until this setting is on. GitHub only exposes the setting on **public**
+  repos — attempting it while private returns 404 — so it cannot be done in
+  advance. Run it the moment visibility flips, then click the link once to
+  confirm the form loads:
+  ```bash
+  gh api -X PUT repos/NMitchem/Sundial/private-vulnerability-reporting
+  gh api repos/NMitchem/Sundial/private-vulnerability-reporting --jq '.enabled'   # expect: true
+  ```
+- [x] **Repo description and topics set** — DONE (2026-08-08). Description is the
+  one-line GPU/PDLP/CPU-f64-verification pitch; topics are `linear-programming`,
+  `optimization`, `webgpu`, `wgpu`, `rust`, `gpu-computing`, `solver`,
+  `webassembly`, `operations-research`, `pdlp`. Set the homepage URL to the demo
+  once §3 gives you one (`gh repo edit NMitchem/Sundial --homepage <DEMO_URL>`).
+- [ ] **Cosmetic, decide and move on:** GitHub's license detector reports the repo
+  as "Apache License 2.0" rather than the dual `MIT OR Apache-2.0`, because
+  `LICENSE-MIT` and `LICENSE-APACHE` sit side by side and its scanner picks one.
+  This is normal for dual-licensed Rust projects and the `Cargo.toml` metadata,
+  per-crate `LICENSE-*` files, and `CONTRIBUTING.md` all state the real terms.
+  Nothing to fix unless the sidebar label bothers you.
 - [x] **License is already MIT OR Apache-2.0** — `LICENSE-MIT` and
   `LICENSE-APACHE` confirmed present at the root, matching `Cargo.toml`.
   `NOTICE` records the provenance of the bundled Netlib fixtures and TLC taxi
@@ -43,13 +65,12 @@ Order matters: get the repo public and CI green first, then the demo deploy
   ```bash
   bash scripts/verify_clean_checkout.sh
   ```
-- [ ] **Git history still contains the planning scaffolding.** `30afa64` removed
-  `docs/superpowers/` and `or-project-proposals.md` from the tree, but their full
-  text stays recoverable with `git show` on the ~30 commits that carried them.
-  There are no secrets in them — it is internal planning prose. Decide before the
-  repo goes public: leave it (normal for an unsquashed history), or rewrite now,
-  which is still cheap because `main` is the only pushed branch and the repo is
-  private. This is the last irreversible choice on the list.
+- [x] **Git history keeps the planning scaffolding** — decided 2026-08-08, leave
+  it. `30afa64` removed `docs/superpowers/` and `or-project-proposals.md` from the
+  tree, but their full text stays recoverable with `git show` on the commits that
+  carried them. There are no secrets in them — it is internal planning prose, and
+  an unsquashed history is normal for an open-source project. **No history rewrite
+  will be performed.** Do not revisit this by rewriting published history later.
 
 ## 1. Create the GitHub repo and push — DONE (2026-07-19)
 
