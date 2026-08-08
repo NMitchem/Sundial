@@ -8,8 +8,8 @@ change that will be rejected on principle no matter how well it is written.
 ## Before you start
 
 Read [`docs/STATUS.md`](docs/STATUS.md) first — it is the current state of the
-project, including what is deliberately unfinished and why. Specs and plans of
-record live under `docs/superpowers/`.
+project, including what is deliberately unfinished and why. The design documents
+behind the architecture live in [`docs/design/`](docs/design/).
 
 For anything larger than a bug fix, **open an issue before writing code.** Several
 things that look like obvious improvements (double-double accumulation, GPU

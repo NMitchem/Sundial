@@ -10,3 +10,8 @@ bench/
 /hero-*.json
 *.tgz
 .DS_Store
+
+# Internal planning scratch — not part of the published project
+docs/superpowers/
+docs/or-project-proposals.md
+.claude/

@@ -1,7 +1,9 @@
 # Taxi demo — "Every open ride in Manhattan, dispatched perfectly" (design)
 
-**Date:** 2026-07-18 · **Status:** approved design, pre-plan
-**Goal:** a zero-explanation, viral-shareable demo page that makes Sundial's browser-GPU solving feel like magic to a CS-curious visitor who neither knows nor cares what an LP is.
+The design document (2026-07-18) for `web/taxi.html`.
+
+**Goal:** a demo page that needs no explanation — it should make browser-GPU
+solving feel like magic to a visitor who neither knows nor cares what an LP is.
 
 **The pitch (the sentence a visitor texts a friend):**
 > "This site paired 1,024 taxis with 1,024 riders in Manhattan — the provably best pairing out of a million routes — in seconds, on my GPU, in my browser. Then I tapped the map to add myself and watched the whole city re-plan around me."

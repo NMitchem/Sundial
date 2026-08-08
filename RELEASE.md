@@ -29,13 +29,11 @@ Order matters: get the repo public and CI green first, then the demo deploy
   `LICENSE-APACHE` confirmed present at the root, matching `Cargo.toml`.
   `NOTICE` records the provenance of the bundled Netlib fixtures and TLC taxi
   extract.
-- [ ] **Fill in the Code of Conduct contact.** `CODE_OF_CONDUCT.md` ships with a
-  `<CONDUCT_CONTACT>` placeholder in its Enforcement section — put a real address
-  there (or a dedicated alias, not necessarily your personal email) before the
-  repo goes public:
-  ```bash
-  grep -n '<CONDUCT_CONTACT>' CODE_OF_CONDUCT.md
-  ```
+- [ ] **Code of conduct — add one when there's a community to govern.** There is
+  deliberately no `CODE_OF_CONDUCT.md`: with a single maintainer and no
+  contributors it would document a process that doesn't exist. Add the
+  Contributor Covenant with a real reporting address when you enable Discussions
+  or merge a first outside PR.
 - [ ] **Merge to `main`.** Confirm the branch you're shipping is merged and the
   tree is green locally:
   ```bash

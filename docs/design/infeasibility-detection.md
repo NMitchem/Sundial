@@ -1,7 +1,9 @@
-# Sundial M2 — Design Spec
+# Infeasibility and unboundedness detection
 
-**Date:** 2026-07-10 · **Status:** approved by user (design approved in brainstorming session 2026-07-10)
-**Origin:** M2 paragraph of [`2026-07-07-sundial-design.md`](2026-07-07-sundial-design.md), refined after M1 completion (merged to main 2026-07-10; see `docs/STATUS.md`).
+The design document (2026-07-10) for verified `Infeasible`/`Unbounded`
+detection, the df64 precision experiment, and the npm packaging that followed
+[`architecture.md`](architecture.md). Section 1 carries the Farkas certificate
+math that `sundial-core/src/farkas.rs` implements.
 
 ## Goal
 

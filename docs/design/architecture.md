@@ -1,7 +1,8 @@
-# Sundial — Design Spec
+# Sundial — Architecture
 
-**Date:** 2026-07-07 · **Status:** approved by user (sections 1–3 approved in brainstorming session)
-**Origin:** top-ranked proposal in [`or-project-proposals.md`](../../or-project-proposals.md) (adversarially verified: zero prior art crosses WebGPU with any LP algorithm).
+The original design document (2026-07-07), kept as a record of why the system
+is shaped the way it is. Where it disagrees with the code, the code wins; see
+[`STATUS.md`](../STATUS.md) for current state.
 
 ## Goal
 

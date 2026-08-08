@@ -6,11 +6,117 @@ Updated: 2026-08-08 (M2 closed 2026-07-14; taxi demo merged 2026-07-19; repo pus
 
 - [x] **M0** — GPU solver core (restarted PDHG in WGSL), MPS parser, CPU f64 reference, CLI, Netlib gate, minimal web demo. **Merged to main 2026-07-07.**
 - [x] **M1** — matrix-free `LinOp`; optimal-transport hero at 1,048,576 variables, native + in-browser; drop-a-file benchmark page; CLI Netlib sweep tooling producing the comparison table. **All 13 implementation tasks (1–11 + 6a) complete and review-approved.**
-- [x] **M2** (spec: `docs/superpowers/specs/2026-07-10-sundial-m2-design.md`) — parser hardening, infeasibility/unboundedness detection, df64 precision experiment, three new transport presets + draw-your-own masses, GPU-presolve literature memo, launch writeup + RELEASE checklist, and the `sundial-lp` npm package. **All 12 implementation tasks complete and review-approved; browser human gate passed 2026-07-14 — M2 closed.** Backlog carried forward: `docs/superpowers/m2-backlog.md` + M3 seeds below.
+- [x] **M2** (design: `docs/design/infeasibility-detection.md`) — parser hardening, infeasibility/unboundedness detection, df64 precision experiment, three new transport presets + draw-your-own masses, GPU-presolve literature memo, launch writeup + RELEASE checklist, and the `sundial-lp` npm package. **All 12 implementation tasks complete and review-approved; browser human gate passed 2026-07-14 — M2 closed.** Backlog carried forward into the M3 seeds below.
 
 **Launch bar** (from spec): hero ≥1M vars → 1e-4 interactive on a MacBook; ≥25 Netlib + ≥5 large instances in the table; `npm install` works; writeup done. **Met** — sweep table now covers 32/32 netlib instances (20 Optimal + 12 honest IterationLimit, 0 parse errors), all of them small/medium classic-Netlib; the ≥5-large-instance bar is met by the 1M-variable transport hero, reported separately (M1/M2 results below, `docs/writeup.md`), not by additional rows in that table; `sundial-lp` packs cleanly via `npm pack` (never published — see M2 results); `docs/writeup.md` is a complete Show HN draft with `<DEMO_URL>` as its sole unfilled placeholder.
 
 ## M3 (in progress)
+
+### 2026-08-08 — The "f32 wall" was misattributed; movement-based ω recovers 10 of the 12
+
+**Diagnostic (decisive).** The 12 `IterationLimit` rows have been described since
+M1 as "the documented f32 wall." That attribution is **wrong**. Re-solving all 12
+on the **CPU f64 reference** (`--engine cpu`, 500k iters) reproduces every failure
+— in f64, where no 1e-4 precision floor exists. The signature is not precision
+loss but extreme step imbalance: one side collapses to machine epsilon while the
+other stalls orders of magnitude above tolerance (agg: rel_primal **1.6e-16** vs
+rel_dual 1.3e-2; sc205: **8.4e-17** vs rel_gap **7.7e-1**), and the direction is
+*inverted* across instances (scorpion/ship04s stall on the primal with the dual
+at ~1e-15). No single fixed τ=σ can serve both — which is exactly the case for an
+adaptive primal weight. Root cause: per the M1 Task 6a adjudication the explicit
+(Ruiz+PC) path runs **completely unweighted**.
+
+**Fix (experiment, opt-in).** `weight::update_primal_weight_movement` implements
+PDLP's movement rule ω ← ω^(1−θ)·(Δy/Δx)^θ, θ=0.5, measured between consecutive
+restart points in iterate space. The structural difference from the M1
+residual-ratio rule is why it works where that one failed: the residual rule
+multiplies ω by the full damped ratio every restart and has **no fixed point**
+unless residuals balance exactly (hence the observed 0.02↔0.12 orbit); the
+movement rule is a **contraction in log space** toward log(Δy/Δx), so error halves
+per restart. Pinned by `movement_update_contracts_toward_the_movement_ratio`.
+
+**Measured (CPU f64, 500k iters, all 32 Netlib instances):** **19/32 → 28/32
+Optimal — 10 wins, 1 regression.** Wins: agg, agg2, agg3, beaconfd, kb2, lotfi,
+sc205, scorpion, share1b, ship04s.
+
+**Caveats, attached:**
+- **share2b is a real regression, not slow convergence.** Baseline solves it in
+  93,376 iters; with movement-ω it fails at 2M with the gap *worse* than at 500k
+  (1.68e-2 vs 4.84e-3). It is the **same instance** that regressed under the M1
+  residual-ratio ω — share2b appears pathological for any ω adaptation on the
+  equilibrated path. Unexplained; this is why the flag is opt-in.
+- The 19/32 baseline above is CPU@500k and is *not* comparable to the published
+  GPU@2M row (beaconfd, for one, is Optimal in the published table and only
+  fails the CPU@500k baseline on the cap). GPU numbers are below.
+- Default is **off** (`SolveOptions::movement_weight`, CLI `--movement-weight`);
+  with it off, results are bit-identical to published behavior.
+- Ratio direction was adjudicated **empirically**, not assumed: PDLP's published
+  ω → Δy/Δx scored 28/32; the inverted ratio scored **3/32** (0 wins, 16
+  regressions). The losing variant was deleted.
+
+### 2026-08-08 — Movement ω ported to the GPU engine
+
+New surface: a `reduce_diff_sq` WGSL entry (Σ(a−b)² with the same Neumaier
+compensation as `reduce_dot`; differencing happens **inside** the kernel because
+at a restart the two iterates are neighbours and an f32 subtract-then-dot would
+round the movement away), `Reducer::record_diff_sq`/`diff_sq`, and `x_prev`/
+`y_prev` restart-point buffers allocated **only when armed** — the 1M hero is
+matrix-free, so it never pays for them. Per restart the engine records both
+Δ-reductions into `results[12..14]`, reads them back, and rewrites τ/σ into the
+two static uniforms in place, exactly as the residual-ratio path already does.
+Gate is the complement of `primal_weight`, mirroring the CPU
+`scaling.is_some()`. Restart cadence only, so the extra readback is ~16 per
+solve against tens of thousands of iterations.
+
+**Measured (GPU, 2M cap — the published sweep's exact settings):**
+**20/32 → 30/32 Optimal, 10 wins, ZERO status regressions.** Among the 20
+instances Optimal in both, **18 got faster**; total iterations across them fall
+**3,451,008 → 659,264 (5.2×)**. Extremes: beaconfd 1,680,896 → 10,432 iters
+(161×), agg2 2M-stall → 7,680.
+
+**The share2b CPU regression does not reproduce on the GPU** — it stays Optimal,
+though 3.3× slower (123,136 → 400,896 iters).
+
+**Caveat that the status column hides — read before flipping the default.**
+Status counts improve, but *objective accuracy against the Netlib published
+optima does not uniformly improve*, and for two instances it is materially worse
+than anything in the current table:
+
+| instance | published | with movement ω |
+|---|---|---|
+| lotfi | IterationLimit (rel err 8.8e+0) | **Optimal, rel err 5.8e-2** |
+| bnl1 | IterationLimit (rel err 2.1e-3) | **Optimal, rel err 1.2e-2** |
+| agg3 | IterationLimit (rel err 5.5e-3) | Optimal, rel err 1.2e-3 |
+| etamacro | Optimal, rel err 2.4e-4 | Optimal, **rel err 1.5e-3** |
+
+All four are honest `Optimal`: each passed the independent CPU-f64 KKT recheck at
+its returned point. But a relative KKT residual ≤ 1e-4 does not tightly bound
+objective error on ill-conditioned or degenerate instances, and lotfi/bnl1 land
+far outside the ≤1e-3 band every currently-Optimal instance sits in (worst real
+case today: adlittle 6.7e-4). **Flipping the default would therefore invalidate
+the README/writeup claim that every Optimal instance matches the published
+optimum to better than 1e-3.** etamacro also gets *less* accurate despite already
+being Optimal.
+
+Two instances still fail (bore3d, kb2), and both degrade in residual quality even
+though the status label is unchanged: bore3d's primal goes 2.4e-2 → 1.7e+2, kb2's
+dual 2.8e-5 → 6.9e-2. kb2 is a *win* on the f64 reference but a degradation on
+the f32 GPU — a genuine engine difference, unexplained.
+
+**Adjudicated 2026-08-08 (user):** keep the default **off**; cite 30/32 in the
+writeup as an *opt-in* result with the accuracy caveat stated inline. Rationale:
+this buys the stronger number in the narrative without weakening the published
+table, and it avoids trading measurable objective accuracy for an advertisable
+status count — the trade this project refuses to make silently. With the default
+off, every published number stands unchanged and the ≤1e-3 accuracy claim on the
+Optimal rows remains true.
+
+**Still open, lower priority:** bore3d and kb2 fail under both configurations,
+and both *degrade* in residual quality under movement ω behind an unchanged
+status label (bore3d primal 2.4e-2 → 1.7e+2; kb2 dual 2.8e-5 → 6.9e-2). kb2 is a
+win on the f64 reference and a degradation on the f32 GPU — an engine split with
+no explanation yet. Worth a look before any future default flip, since a flip
+would ship that degradation silently.
 
 ### 2026-07-19 — Taxi demo (M3 seed): Manhattan matching page
 
@@ -32,7 +138,7 @@ loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 
 ## M2 results (verified on Apple M4 Pro / Metal, 2026-07-10)
 
-- **Netlib sweep refresh** (Tasks 1–2, 11): parser now accepts set-name-less RHS lines (real-world netlib corner) and the `up_negative` flag resets correctly on repeated `UP` lines for the same column. blend.mps, previously a parse error, now solves **Optimal (−30.8119660669, 7,488 iters, 1.1 s)** against optima-file value −30.812149846 (gap within verified mu 9.98e-5). Full sweep: **20/32 Optimal, 12 IterationLimit (honest f32 wall), 0 parse errors** (was 19/32 + 1 parse error at M1). e226's sign-convention footnote (docs/writeup.md, README) still applies and is unchanged by this refresh.
+- **Netlib sweep refresh** (Tasks 1–2, 11): parser now accepts set-name-less RHS lines (real-world netlib corner) and the `up_negative` flag resets correctly on repeated `UP` lines for the same column. blend.mps, previously a parse error, now solves **Optimal (−30.8119660669, 7,488 iters, 1.1 s)** against optima-file value −30.812149846 (gap within verified mu 9.98e-5). Full sweep: **20/32 Optimal, 12 IterationLimit (honest non-solves; the "f32 wall" attribution carried here was disproved 2026-08-08 — see M3 above), 0 parse errors** (was 19/32 + 1 parse error at M1). e226's sign-convention footnote (docs/writeup.md, README) still applies and is unchanged by this refresh.
 - **Infeasibility / unboundedness detection** (Tasks 3–4): CPU Farkas-certificate verification plus a GPU-side streak detector (monotonic-with-margin growth threshold GROWTH=1.02, chosen after proving PDHG divergence on an infeasible/unbounded instance is *linear*, not geometric, so a looser geometric streak could structurally never trigger — Applegate et al.). Verification failure resets the streak to 0 (matches CPU semantics; delays rather than misses detection under sustained divergence). **Field data on the netlib infeasible/unbounded set (6 instances): 2/6 certified Infeasible** (itest2, galenet, both @ 12,544 iters), **4 honest IterationLimit, 0 false Optimal** — the certificate path is structurally incapable of a false positive (an Optimal claim always requires the independent CPU-f64 KKT recheck; a streak claim always requires a Farkas certificate check), so the 2/6 recall is an honest, if partial, detection rate rather than a tuning shortfall. Both constructed Farkas oracles (primal-infeasible, dual-unbounded) certify at iteration 12,352 (3 restarts) under GROWTH=1.02, hand-traced against the math by the reviewer.
 - **df64 (double-double) precision experiment** (Tasks 5–6): **DEFERRED — mechanism-level, not a tuning outcome.** Source-verified finding: on wgpu 30 / Metal, `MTLCompileOptions.fastMathEnabled=YES` is hardcoded with no wgpu/naga control surface (checked wgpu-hal `metal/device.rs`, naga `msl::Options`), so Metal's fast-math folds `fma(a,b,-p)` to `0`, destroying the error-free-transform arithmetic df64 depends on — df64 compiles and runs correctly (machinery is sound; `--df64` solves still reach `Optimal`) but is byte-identical to plain f32 on this backend. **Bonus finding, no gate impact:** the same fast-math collapse silently degrades the *existing* M0 Neumaier compensated-summation kernel (`reduce.wgsl`) to plain f32 as well (e32==e64 exactly) — the 1e-4 verified tier is unaffected, but the "compensated accumulation" doc claim needs a Metal caveat (now carried into the honest-limits section of docs/writeup.md). Full analysis: `docs/notes/df64-experiment.md`. Revisit condition below (M3 seeds).
 - **Hero polish** (Tasks 7–8): three new transport presets (spiral, checker, corners) alongside blobs and ring→square; **draw-your-own masses** mode lets a user paint source/target mass by hand in the browser and solve the resulting custom optimal-transport instance (junk-value cleaning + per-side normalization in `transport::problem_from_masses`).
@@ -47,7 +153,7 @@ loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 - **1M-variable optimal-transport hero:** two 32×32 grids (blobs preset), n = 1,048,576 vars, m = 2,048 equality rows — **Optimal, 16,000 iterations, 9 restarts, ~9.4 s wall, verified mu 9.83e-5** (CPU-f64 KKT at the returned point). Reproduce: `cargo run -p sundial-cli --release -- transport --grid 32`. Gate test: `gpu_transport_1m_variables_to_1e4` (crates/sundial-core/tests/gpu_transport.rs). CPU sanity at grid 8: Optimal, 1,792 iters, 25 ms, mu 9.89e-5.
   - History, recorded honestly: the gate first failed at τ=σ (IterationLimit, 500,032 iters, 290 s, mu 1.23e-4 — dual ~1e-9, primal plateau ~1e-4). Fixed by primal-weight balancing (Task 6a): PDLP ω₀ = ‖c‖/‖q‖ (iterate space) + √-damped residual-balance update at restarts, ω ∈ [1e-4, 1e4]. **Adjudicated:** ω applies to the matrix-free/unscaled path only — on the Ruiz+PC-equilibrated explicit path it limit-cycled (0.02↔0.12) and regressed share2b; the explicit path is proven bit-identical to the pre-ω τ=σ behavior. Movement-based ω for the explicit path is M2 backlog.
 - **Readback batching** (Task 1, M0-review prerequisite): one readback per residual check (was ~11). afiro CLI wall: ~630 ms vs 760 ms M0 record (~17% faster; readback still dominates at this tiny scale).
-- **Netlib sweep** (Task 10): 32 instances fetched from netlib.org (`scripts/fetch_netlib.sh` compiles netlib's emps.c; `bench/` gitignored, reproducible). **19/32 Optimal at CPU-f64-verified 1e-4; 12 IterationLimit (the documented f32 wall — honest rows, cap 2M iters); 1 parse error** (blend.mps line 355, set-name-less RHS format — M2 backlog). Optimal includes afiro, adlittle, bandm, beaconfd, brandy, e226, etamacro, israel, recipe, sc105, sc50a, sc50b, scagr25, scagr7, stocfor1 (+ others in results.csv). IterationLimit includes agg/agg2/agg3, bnl1, bore3d, capri, kb2, lotfi, sc205, ship04s (near-miss: primal 1.551e-4). Tooling: `sundial bench <dir> --out results.csv` (name field quoted, error rows carry full anyhow chains), `sundial report results.csv --out report.md`.
+- **Netlib sweep** (Task 10): 32 instances fetched from netlib.org (`scripts/fetch_netlib.sh` compiles netlib's emps.c; `bench/` gitignored, reproducible). **19/32 Optimal at CPU-f64-verified 1e-4; 12 IterationLimit (honest rows, cap 2M iters — originally attributed to an f32 precision wall; that attribution was disproved 2026-08-08, see M3 above); 1 parse error** (blend.mps line 355, set-name-less RHS format — M2 backlog). Optimal includes afiro, adlittle, bandm, beaconfd, brandy, e226, etamacro, israel, recipe, sc105, sc50a, sc50b, scagr25, scagr7, stocfor1 (+ others in results.csv). IterationLimit includes agg/agg2/agg3, bnl1, bore3d, capri, kb2, lotfi, sc205, ship04s (near-miss: primal 1.551e-4). Tooling: `sundial bench <dir> --out results.csv` (name field quoted, error rows carry full anyhow chains), `sundial report results.csv --out report.md`.
   - **e226 footnote:** its netlib-readme "known optimum" uses the opposite sign convention for the objective-row RHS constant (delta = 2× the constant ≈ 7.11). Our verified optimum is −11.635074 (KKT-certified at 1e-4); the readme lists ≈ −18.75. The report shows rel err 3.6e-1 against the readme value — that's a convention mismatch, not a solver defect. The optima file is not altered; this is a footnote only.
 - **Browser:** wasm API adds transportPreview / solveTransport (live marginal snapshots) / solveMpsBytes (gzip) + solveMps. Hero page (`index.html`): preset (blobs, ring→square) + grid (16×16 = 65,536 vars / 32×32 = 1,048,576 vars) pickers, three live heatmaps (source / mass arriving / target), rAF-throttled convergence chart. Bench page (`bench.html`): fixture picker + drag-drop `.mps`/`.mps.gz` + honest results table. Machine gates all pass (tsc clean, vite build emits both pages, wasm-pack build clean).
   - **Interactive browser verification: CONFIRMED by user 2026-07-10** (screenshots): hero at 32×32 (1,048,576 vars) reaches `Optimal (CPU f64 verified)` in-browser — 16,000 iterations at 0.547 ms/iter (≈9 s solve) on `apple (BrowserWebGpu)`, arriving-mass panel visually converged to the target; 16×16 in 1,000 ms wall (8,256 iters, verified residuals ≤ 4.8e-5); bench page solves afiro to Optimal (−464.75309, 380 ms wall). This also closes M0's carried-over browser-verification item.
@@ -78,27 +184,29 @@ loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 
 ## Key documents
 
-- `docs/superpowers/specs/2026-07-07-sundial-design.md` — approved spec: architecture, milestones, launch bar, platform constraints
-- `docs/superpowers/plans/2026-07-07-sundial-m0.md` — M0 plan (normative, includes all mid-flight adjudications)
-- `docs/superpowers/plans/2026-07-07-sundial-m1.md` — M1 plan (12 tasks + 6a; all complete, includes all mid-flight adjudications)
-- `docs/superpowers/specs/2026-07-10-sundial-m2-design.md` — approved M2 spec (launch-ready-unpublished, infeasibility, df64, hero polish, npm last)
-- `docs/superpowers/plans/2026-07-10-sundial-m2.md` — M2 plan (12 tasks; written 2026-07-10, all complete)
-- `docs/superpowers/m2-backlog.md` — minor items carried from M1's final review, for M2/M3 triage
+- `docs/design/architecture.md` — architecture, algorithm and numerics, platform constraints
+- `docs/design/infeasibility-detection.md` — Farkas certificate math behind `farkas.rs`; df64 and npm packaging design
+- `docs/design/taxi-demo.md` — design of the Manhattan matching page
 - `docs/notes/df64-experiment.md` — full df64 findings (Metal fast-math source trace, Neumaier collateral, decision gate)
 - `docs/notes/gpu-presolve-memo.md` — GPU-presolve literature memo (Cederberg & Boyd, arXiv 2604.23951) and defer rationale
 - `docs/writeup.md` — Show HN launch draft (`<DEMO_URL>` is the sole placeholder)
 - `RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); §1 (repo created, pushed) and §2 (CI green) done, everything from §3 (demo deploy) on still unexecuted
-- `docs/or-project-proposals.md` — the original OR project survey (Sundial plus 4 other adversarially-vetted proposals)
 
 ## Known gaps / notes
 
 - Remote is `https://github.com/NMitchem/Sundial` (pushed 2026-07-19). The CI workflow (`.github/workflows/ci.yml`) **has** executed on GitHub runners and passed on its first run (3m20s, ubuntu-latest) — `RELEASE.md` §1–2 are effectively done. The repo is still **private**; making it public is the outstanding step.
-- Task-level execution records (briefs, implementer reports, review verdicts) were session scratch (`.superpowers/sdd/`, gitignored); their outcomes are summarized here and in the plan's adjudication commits.
 - `npm publish` for `sundial-lp` has never been run anywhere — the package exists only as a local, inspected `.tgz` (see M2 results); publishing is a `RELEASE.md` step, not part of this milestone.
 
 ## M3 seeds (carried out of M2, for the next plan)
 
 - **64×64 transport grid / in-shader cost generation:** the matrix-free transport operator materializes only the cost vector today (4 MiB at g=32); at g=64 (16.7M vars) that cost vector grows to 67 MiB, so cost generation needs to move in-shader before the hero can scale past 32×32.
 - **df64-iterates decision:** revisit only when either (a) wgpu exposes an IEEE-strict/math-mode control for the Metal backend (no such control exists as of wgpu 30/naga 30 — tracked by watching wgpu releases), or (b) targeting a Vulkan/DX12-only context where fast-math isn't forced on by default. Even then, Finding 3's cross-workgroup f32 collapse (the Neumaier reduction combine) must also be fixed before a revisit could show a real precision-tier gain.
-- **Movement-based primal-weight update:** a `‖Δx‖/‖Δy‖`-style ω update for the explicit (Ruiz+PC-equilibrated) path, only if that path ever needs primal-weight balancing — the current residual-ratio ω update limit-cycles there (M1 Task 6a adjudication), so the explicit path runs un-weighted today.
+- ~~**Movement-based primal-weight update:** a `‖Δx‖/‖Δy‖`-style ω update for the explicit (Ruiz+PC-equilibrated) path.~~ **Done 2026-08-08, opt-in** (CPU + GPU; 20/32 → 30/32 on the GPU sweep, 5.2× fewer iterations on instances that already solved). Default deliberately **off** — see the M3 entries above for the accuracy trade that decision turns on.
 - **GPU-presolve revisit condition:** once explicit-CSR-path benchmarking on Sundial specifically shows large/redundant instances where presolve-shaped headroom actually exists (the literature's win rate is concentrated in a minority of large/slow instances, not universal) — see `docs/notes/gpu-presolve-memo.md`.
+
+Performance and tooling items carried forward, none blocking:
+
+- **Alias original-space and iterate-space GPU buffers when scaling is identity.** The operator path currently uploads both; aliasing halves the n-sized buffer count at 1M+ variables.
+- **Bind-group caching in `GpuOp` implementations.** Per-iteration bind-group creation is measurable CPU overhead at high iteration rates.
+- **Comparison automation against published CPU/CUDA numbers.** `sundial report` links to the Mittelmann benchmark; a curated overlap table is manual today.
+- **Chart: true partial redraw**, if rAF coalescing proves insufficient at hero scale.

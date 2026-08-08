@@ -1,14 +1,13 @@
-# df64 accumulator experiment (M2, 2026-07-10)
+# df64 accumulator experiment (2026-07-10)
 
 Hardware: Apple M4 Pro / Metal, release builds. Tier 1 only: df64 (two-f32)
 accumulators in SpMV / transport sums / dot+sum reductions; f32 iterates.
-Behind `SolveOptions::df64` / CLI `--df64`, default off (see M2 Task 5,
-`.superpowers/sdd/m2-task-5-report.md`).
+Behind `SolveOptions::df64` / CLI `--df64`, default off.
 
 ## Protocol: planned vs. what actually happened
 
-The plan (`docs/superpowers/specs/2026-07-10-sundial-m2-design.md` §2, this
-plan's Task 6) fixed a three-sweep protocol before any implementation existed:
+The design (`docs/design/infeasibility-detection.md` §2) fixed a three-sweep
+protocol before any implementation existed:
 
 1. The 12 M1 f32-wall instances, tol 1e-4, `--df64`: how many now reach
    verified Optimal?
