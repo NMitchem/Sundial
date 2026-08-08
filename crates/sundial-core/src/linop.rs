@@ -37,8 +37,8 @@ impl LinOp for CsrOp<'_> {
 }
 
 /// ‖A‖₂ via power iteration on AᵀA (Rayleigh quotient), operator form.
-/// Same algorithm and seed behavior as the M0 matrix version — the matrix
-/// version now delegates here, so results are bitwise identical.
+/// The explicit-matrix version delegates here, so results are bitwise
+/// identical between the two forms for the same seed.
 pub fn power_iteration_norm_op(op: &dyn LinOp, iters: usize, seed: u64) -> f64 {
     let mut rng = fastrand::Rng::with_seed(seed);
     let n = op.n_cols();

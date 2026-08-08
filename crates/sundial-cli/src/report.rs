@@ -8,8 +8,8 @@ pub struct Optima {
     pub notes: HashMap<String, String>,
 }
 
-/// CSV: `name,objective[,note]` — the note column is optional per row and
-/// per file (M0/M1 files had no header note column).
+/// CSV: `name,objective[,note]` — the note column is optional both per row
+/// and per file, so older files without a note header still parse.
 pub fn parse_optima(text: &str) -> Optima {
     let mut values = HashMap::new();
     let mut notes = HashMap::new();

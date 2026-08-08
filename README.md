@@ -76,14 +76,26 @@ console.log(result.status, result.objective); // "Optimal (CPU f64 verified)", �
   real infeasible/unbounded set, 2 of 6 instances certify; the other 4 stop
   honestly at `IterationLimit`. Zero false `Optimal` claims — a missed
   detection costs iterations, a false claim would cost trust.
-- Netlib sweep (32 instances): 20/32 reach verified 1e-4 Optimal; the other
-  12 stop honestly at `IterationLimit` — that's the documented f32 wall, not
-  a silent failure — and 0 parse errors (blend.mps's set-name-less RHS
-  format, an M1-era parser gap, is now handled). One footnote: e226's
-  netlib-readme optimum uses the opposite sign convention for the
-  objective-row RHS constant, so our verified −11.635074 reads as a large
-  relative error against the readme's ≈ −18.75 — that's a convention
+- Netlib sweep (32 instances): 20/32 reach verified 1e-4 Optimal; the other 12
+  stop honestly at `IterationLimit`, not a silent failure; and 0 parse errors
+  (blend.mps's set-name-less RHS format, an M1-era parser gap, is now handled).
+  One footnote: e226's netlib-readme optimum uses the opposite sign convention
+  for the objective-row RHS constant, so our verified −11.635074 reads as a
+  large relative error against the readme's ≈ −18.75 — that's a convention
   mismatch, not a solver defect.
+- **Correction (2026-08-08):** those 12 rows were described here as "the f32
+  wall." That was wrong, and we tested it rather than leave it standing. The
+  CPU **f64** reference fails the same 12 the same way — with one side at
+  machine epsilon (~1e-16) while the other stalls above tolerance — so
+  precision is not the limit. The cause is primal-weight imbalance on the
+  explicit path, which runs unweighted. An opt-in movement-based ω
+  (`--movement-weight`) takes the same GPU sweep to **30/32 with no status
+  regressions**, and cuts iterations 5.2× across the instances that already
+  solved. It is **off by default** and the table above is the default-off run,
+  because the win is not free: two newly-Optimal instances (lotfi, bnl1) land
+  1–6% off the published optima — honest `Optimal` by the KKT certificate, but
+  outside the ≤1e-3 accuracy band the rows above sit in. Full numbers and the
+  open default-flip decision: `docs/STATUS.md` (M3).
 - Simplex on a CPU still wins on small LPs — the GPU pays off at scale,
   which is what the 1M-variable transport hero demonstrates.
 

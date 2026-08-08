@@ -139,3 +139,64 @@ fn no_false_positives_on_feasible_set() {
         );
     }
 }
+
+/// A row dual must lie in the sign cone induced by its row bounds: a row that
+/// is open above can only carry y ≤ 0, one open below only y ≥ 0.
+///
+/// This is the invariant that makes the GPU/CPU projection asymmetry safe.
+/// `gpu/engine.rs` runs `project_dual` before reporting because f32 iteration
+/// leaves ~1e-7 wrong-sign noise on inactive rows; `reference.rs` deliberately
+/// does not, because its dual prox step `y = v − σ·clamp(v/σ, l, u)` lands in
+/// the cone *exactly* in f64 (open above ⇒ clamp ≥ v/σ ⇒ y ≤ 0, and mirrored
+/// below), and Ruiz unscaling multiplies by positive factors, preserving sign.
+/// If that prox step ever changes, this fires and the projection stops being
+/// optional.
+fn assert_dual_in_sign_cone(p: &LpProblem, y: &[f64], what: &str) {
+    let mut open_rows = 0;
+    for (i, &yi) in y.iter().enumerate() {
+        if !p.row_upper[i].is_finite() {
+            open_rows += 1;
+            assert!(yi <= 0.0, "{what}: row {i} open above but y = {yi} > 0");
+        }
+        if !p.row_lower[i].is_finite() {
+            open_rows += 1;
+            assert!(yi >= 0.0, "{what}: row {i} open below but y = {yi} < 0");
+        }
+    }
+    assert!(
+        open_rows > 0,
+        "{what}: no open row bounds — test is vacuous"
+    );
+}
+
+#[test]
+fn cpu_certified_exits_return_sign_cone_feasible_duals() {
+    let opts = SolveOptions {
+        tol: 1e-4,
+        max_iters: 500_000,
+        ..Default::default()
+    };
+    let p = infeasible_lp();
+    let sol = reference::solve(&p, &opts, &mut |_| {});
+    assert_eq!(sol.status, SolveStatus::Infeasible);
+    assert_dual_in_sign_cone(&p, &sol.y, "certified infeasible");
+
+    let u = unbounded_lp();
+    let sol = reference::solve(&u, &opts, &mut |_| {});
+    assert_eq!(sol.status, SolveStatus::Unbounded);
+    assert_dual_in_sign_cone(&u, &sol.y, "certified unbounded");
+}
+
+#[test]
+fn cpu_optimal_exits_return_sign_cone_feasible_duals() {
+    let opts = SolveOptions {
+        tol: 1e-4,
+        max_iters: 300_000,
+        ..Default::default()
+    };
+    for seed in 0..4u64 {
+        let (p, _, _, _) = testgen::generate(seed, 30, 20);
+        let sol = reference::solve(&p, &opts, &mut |_| {});
+        assert_dual_in_sign_cone(&p, &sol.y, &format!("seed {seed} ({:?})", sol.status));
+    }
+}

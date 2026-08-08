@@ -190,8 +190,8 @@ struct MatchResult {
     // WasmResult fields listed FLAT — #[serde(flatten)] would route through
     // serialize_map, which serde_wasm_bindgen turns into an ES6 Map instead
     // of a plain object, silently breaking result.field access in JS
-    // (Task 5 review finding). Flat fields ride the proven serialize_struct
-    // path the four existing entry points use.
+    // Flat fields ride the proven serialize_struct path that the four
+    // existing entry points use.
     status: String,
     objective: f64,
     iterations: u64,

@@ -10,8 +10,8 @@ pub struct Scaling {
 }
 
 impl Scaling {
-    /// No-op scaling for matrix-free problems (adjudication: they solve
-    /// unscaled — the transport incidence structure is already balanced).
+    /// No-op scaling for matrix-free problems: they solve unscaled, because
+    /// the transport incidence structure is already balanced.
     pub fn identity(m: usize, n: usize) -> Self {
         Self {
             row: vec![1.0; m],

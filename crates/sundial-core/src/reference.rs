@@ -1,5 +1,6 @@
-//! CPU f64 reference implementation of restarted PDHG (the "Math conventions"
-//! block of the M0 plan, executable). The GPU engine mirrors this loop exactly.
+//! CPU f64 reference implementation of restarted PDHG — the executable
+//! statement of this project's math conventions. The GPU engine mirrors this
+//! loop exactly, so this file is the arbiter when the two disagree.
 use crate::kkt::{self, KktResiduals};
 use crate::problem::*;
 use crate::scale;
@@ -54,8 +55,8 @@ pub fn solve_op<O: crate::linop::LinOp>(
     opts: &SolveOptions,
     progress: &mut dyn FnMut(ProgressEvent),
 ) -> Solution {
-    // Matrix-free problems solve UNSCALED (adjudication: the transport
-    // operator is an all-ones incidence structure — already balanced).
+    // Matrix-free problems solve UNSCALED: the transport operator is an
+    // all-ones incidence structure, so it is already balanced.
     let norm_a = crate::linop::op_norm2(&p.op, opts.seed);
     let v = p.view();
     solve_view(&v, &v, None, norm_a, opts, progress)
@@ -109,6 +110,22 @@ pub fn solve_view(
     let mut x_new = vec![0.0; n];
     let mut x_tilde = vec![0.0; n];
 
+    // Movement-based ω (experimental) measures ‖Δx‖/‖Δy‖ between consecutive
+    // RESTART points, in iterate space (where τ/σ act). Explicit path only —
+    // the matrix-free path keeps the residual-ratio rule that converges the 1M
+    // gate. Allocated only when armed, so the default path is untouched.
+    let track_movement = opts.movement_weight && scaling.is_some();
+    let mut x_prev_restart = if track_movement {
+        st.x.clone()
+    } else {
+        Vec::new()
+    };
+    let mut y_prev_restart = if track_movement {
+        st.y.clone()
+    } else {
+        Vec::new()
+    };
+
     let mut mu_last_restart = f64::INFINITY;
     let mut iters_since_restart: u64 = 0;
     let mut restarts: u32 = 0;
@@ -161,16 +178,12 @@ pub fn solve_view(
             // IMPORTANT: residuals for termination/restart are evaluated on the
             // ORIGINAL problem (scaled-space residuals passing tol does NOT
             // imply the real ones do). Unscale candidates first.
-            let r_cur = kkt::residuals_view(
-                original,
-                &unscale(scaling, &st.x, true),
-                &unscale(scaling, &st.y, false),
-            );
-            let r_avg = kkt::residuals_view(
-                original,
-                &unscale(scaling, &st.x_avg, true),
-                &unscale(scaling, &st.y_avg, false),
-            );
+            let xc_u = unscale(scaling, &st.x, true);
+            let yc_u = unscale(scaling, &st.y, false);
+            let xa_u = unscale(scaling, &st.x_avg, true);
+            let ya_u = unscale(scaling, &st.y_avg, false);
+            let r_cur = kkt::residuals_view(original, &xc_u, &yc_u);
+            let r_avg = kkt::residuals_view(original, &xa_u, &ya_u);
             let (mu_cand, cand_is_avg) = if r_avg.mu() < r_cur.mu() {
                 (r_avg.mu(), true)
             } else {
@@ -209,11 +222,35 @@ pub fn solve_view(
                     );
                     tau = 0.9 / (norm_a * omega);
                     sigma = 0.9 * omega / norm_a;
+                } else if track_movement {
+                    let l2 = |a: &[f64], b: &[f64]| -> f64 {
+                        a.iter()
+                            .zip(b)
+                            .map(|(u, v)| (u - v) * (u - v))
+                            .sum::<f64>()
+                            .sqrt()
+                    };
+                    let dx = l2(&st.x, &x_prev_restart);
+                    let dy = l2(&st.y, &y_prev_restart);
+                    omega = crate::weight::update_primal_weight_movement(omega, dx, dy);
+                    tau = 0.9 / (norm_a * omega);
+                    sigma = 0.9 * omega / norm_a;
+                    x_prev_restart.copy_from_slice(&st.x);
+                    y_prev_restart.copy_from_slice(&st.y);
                 }
                 // ---- divergence detection (restart cadence only) ----
+                // Reuse the unscaled CANDIDATE rather than re-unscaling st.x/st.y:
+                // restart_from() above has already copied the candidate into st,
+                // so unscale(st.x) here is by construction xc_u (cand_is_avg =
+                // false, st untouched) or xa_u (true, st.x ← st.x_avg). Selecting
+                // by cand_is_avg keeps this bit-identical while dropping two
+                // redundant unscales per live-streak check.
                 let r_cand = if cand_is_avg { &r_avg } else { &r_cur };
-                let x_u = unscale(scaling, &st.x, true);
-                let y_u = unscale(scaling, &st.y, false);
+                let (x_u, y_u) = if cand_is_avg {
+                    (&xa_u, &ya_u)
+                } else {
+                    (&xc_u, &yc_u)
+                };
                 let y_norm = y_u.iter().fold(0.0f64, |a, &v| a.max(v.abs()));
                 let x_norm = x_u.iter().fold(0.0f64, |a, &v| a.max(v.abs()));
                 if y_norm >= crate::farkas::GROWTH * y_norm_prev
@@ -235,14 +272,14 @@ pub fn solve_view(
                 relp_prev = r_cand.rel_primal;
                 reld_prev = r_cand.rel_dual;
                 if infeas_streak >= crate::farkas::STREAK_K {
-                    if crate::farkas::verify_infeasible(original, &y_u).is_some() {
+                    if crate::farkas::verify_infeasible(original, y_u).is_some() {
                         status = SolveStatus::Infeasible;
                         break;
                     }
                     infeas_streak = 0; // failed verification: don't re-hammer
                 }
                 if unbound_streak >= crate::farkas::STREAK_K {
-                    if crate::farkas::verify_unbounded(original, &x_u).is_some() {
+                    if crate::farkas::verify_unbounded(original, x_u).is_some() {
                         status = SolveStatus::Unbounded;
                         break;
                     }
@@ -262,6 +299,15 @@ pub fn solve_view(
     }
 
     // unscale and record the authoritative f64 verification on the ORIGINAL problem
+    //
+    // No dual sign-projection here, unlike gpu/engine.rs — and that asymmetry is
+    // deliberate, not an oversight. The GPU projects because f32 iteration leaves
+    // wrong-sign noise on the duals of rows with an open bound; this path's dual
+    // prox step (`v − σ·clamp(v/σ, l, u)` above) lands in the sign cone exactly
+    // in f64 — open above ⇒ clamp ≥ v/σ ⇒ y ≤ 0, mirrored below — and Ruiz
+    // unscaling multiplies by positive factors, preserving sign. A `project_dual`
+    // call here would be provably dead code. Pinned by the sign-cone tests in
+    // tests/farkas.rs, which fail if the prox step ever stops guaranteeing it.
     let x = unscale(scaling, &st.x, true);
     let y = unscale(scaling, &st.y, false);
     let verified: KktResiduals = kkt::residuals_view(original, &x, &y);

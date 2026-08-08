@@ -64,6 +64,32 @@ fn reduce_sum(@builtin(global_invocation_id) gid: vec3<u32>,
     if (lid.x == 0u) { out_a[wid.x] = sh[0]; }
 }
 
+// partial sum((a-b)^2) with Neumaier compensation per thread — the squared L2
+// movement ‖a−b‖² for the movement-based primal weight. Differencing INSIDE the
+// kernel matters: at a restart a and b are neighbouring iterates, so a separate
+// subtract-then-dot pass would round the difference to f32 before squaring it
+// and lose the small-movement regime the weight update depends on.
+// in_a=a  in_b=b  out_a=partials[num_workgroups]
+@compute @workgroup_size(256)
+fn reduce_diff_sq(@builtin(global_invocation_id) gid: vec3<u32>,
+                  @builtin(local_invocation_id) lid: vec3<u32>,
+                  @builtin(workgroup_id) wid: vec3<u32>) {
+    var sum = 0.0; var comp = 0.0;
+    var i = gid.x;
+    while (i < P.n) {
+        let d = in_a[i] - in_b[i];
+        let v = d * d;
+        let t = sum + v;
+        if (abs(sum) >= abs(v)) { comp = comp + ((sum - t) + v); }
+        else { comp = comp + ((v - t) + sum); }
+        sum = t;
+        i = i + P.stride;
+    }
+    sh[lid.x] = sum + comp;
+    wg_tree_reduce_sum(lid.x);
+    if (lid.x == 0u) { out_a[wid.x] = sh[0]; }
+}
+
 // partial max|a|
 @compute @workgroup_size(256)
 fn reduce_maxabs(@builtin(global_invocation_id) gid: vec3<u32>,

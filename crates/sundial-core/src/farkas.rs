@@ -1,8 +1,7 @@
-//! Farkas / recession-ray certificate verification (spec M2 §1). Engines
-//! only FLAG candidates (iterate-norm growth streaks at restarts); a status
-//! of Infeasible/Unbounded is set exclusively after one of these f64 checks
-//! passes — the same certificate honesty as Optimal. See the plan's
-//! "Certificate math" block for the derivations.
+//! Farkas / recession-ray certificate verification. Engines only FLAG
+//! candidates (iterate-norm growth streaks at restarts); a status of
+//! Infeasible/Unbounded is set exclusively after one of these f64 checks
+//! passes — the same certificate honesty as Optimal.
 use crate::problem::LpView;
 
 pub const EPS_RAY: f64 = 1e-6;

@@ -188,9 +188,20 @@ pub struct SolveOptions {
     pub check_every: u32,
     pub seed: u64,
     /// Opt-in double-double (two-f32) accumulation for the accumulation-critical
-    /// GPU kernels (M2 experiment). Default false: pipeline selection and results
-    /// are byte-identical to the plain-f32 path.
+    /// GPU kernels. Default false: pipeline selection and results are
+    /// byte-identical to the plain-f32 path.
     pub df64: bool,
+    /// Opt-in movement-based ω on the EXPLICIT (Ruiz+PC-equilibrated) path,
+    /// which runs unweighted at τ=σ today because the residual-ratio ω
+    /// limit-cycles there. Experimental; default false, which is bit-identical
+    /// to the published τ=σ behavior.
+    ///
+    /// Ratio direction is ω → Δy/Δx (PDLP as published), settled empirically
+    /// rather than assumed from the paper's notation:
+    /// against this repo's τ = 0.9/(‖A‖ω), σ = 0.9ω/‖A‖ parameterization the
+    /// published direction scored 28/32 on the Netlib sweep while the inverted
+    /// ratio scored 3/32 (16 regressions, 0 wins). See docs/STATUS.md.
+    pub movement_weight: bool,
 }
 
 impl Default for SolveOptions {
@@ -202,6 +213,7 @@ impl Default for SolveOptions {
             check_every: 64,
             seed: 0,
             df64: false,
+            movement_weight: false,
         }
     }
 }

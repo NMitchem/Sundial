@@ -79,7 +79,7 @@ pub async fn solve_gpu_op<O: crate::linop::LinOp>(
             allowed_mib: ctx.max_binding_mib,
         });
     }
-    // Matrix-free = UNSCALED with the operator's exact norm (adjudication).
+    // Matrix-free = UNSCALED, using the operator's exact norm.
     let norm_a = crate::linop::op_norm2(&p.op, opts.seed);
     let s = scale::Scaling::identity(p.n_cons(), p.n_vars());
     let v = p.view();
@@ -120,13 +120,18 @@ async fn solve_core(
     } else {
         1.0
     };
+    // Movement-based ω is the complement of the gate above: it applies on
+    // the EXPLICIT path, which `primal_weight` leaves unweighted at τ=σ. Mirrors
+    // the CPU `solve_view` gate (`opts.movement_weight && scaling.is_some()`).
+    let track_movement = opts.movement_weight && !primal_weight;
     let mut tau = (0.9 / (norm_a * omega)) as f32;
     let mut sigma = (0.9 * omega / norm_a) as f32;
     let (q_norm, c_norm) = kkt::denominators_view(orig); // ORIGINAL-space denominators, f64
     let dev = &ctx.device;
     let k = Kernels::new(dev);
     let red = Reducer::new_with_precision(dev, n.max(m), opts.df64);
-    // results[0]=maxabs, [1..=5]=cur eval, [6..=10]=avg eval, [11..16] spare,
+    // results[0]=maxabs x, [1..=5]=cur eval, [6..=10]=avg eval, [11]=maxabs y,
+    // [12]=‖Δx‖², [13]=‖Δy‖² (movement ω, restart cadence only), [14..16] spare,
     // [16..16+m]=ORIGINAL-space A·x_cur snapshot (written only when requested).
     let results = buffers::storage_zeros_f32(dev, 16 + m, "results");
     let has_snapshot = snapshot.is_some();
@@ -179,6 +184,17 @@ async fn solve_core(
     let y_new = buffers::storage_zeros_f32(dev, m, "y_new");
     let sum_x = b_f(&x0, "sum_x");
     let sum_y = buffers::storage_zeros_f32(dev, m, "sum_y");
+    // Previous RESTART point, for the movement-based ω. Seeded at the start
+    // point (x0, 0) exactly as the CPU path seeds x_prev_restart. Allocated only
+    // when armed — the 1M hero is matrix-free, so it never pays for these.
+    let (x_prev, y_prev) = if track_movement {
+        (
+            Some(b_f(&x0, "x_prev")),
+            Some(buffers::storage_zeros_f32(dev, m, "y_prev")),
+        )
+    } else {
+        (None, None)
+    };
 
     // scratch for iteration + residual evaluation
     let aty = buffers::storage_zeros_f32(dev, n, "aty");
@@ -503,6 +519,41 @@ async fn solve_core(
                     }
                     .bytes(),
                 );
+            }
+            // ---- movement-based ω (explicit path) ----
+            // x_cur/y_cur ARE the restart point here: the cand_is_avg copies
+            // above already folded the average in, matching reference.rs's
+            // "restart_from() then measure" order. Reductions are recorded
+            // BEFORE the prev<-cur copies in the same encoder, so they still
+            // read the previous restart point (command order within an encoder
+            // is submission order).
+            if let (Some(xp), Some(yp)) = (x_prev.as_ref(), y_prev.as_ref()) {
+                let mut enc = dev.create_command_encoder(&Default::default());
+                red.record_diff_sq(dev, &mut enc, &k, x_cur, xp, n, &results, 12);
+                red.record_diff_sq(dev, &mut enc, &k, y_cur, yp, m, &results, 13);
+                enc.copy_buffer_to_buffer(x_cur, 0, xp, 0, (n * 4) as u64);
+                enc.copy_buffer_to_buffer(y_cur, 0, yp, 0, (m * 4) as u64);
+                ctx.queue.submit([enc.finish()]);
+                let mv = buffers::readback_f32(dev, &ctx.queue, &results, 14).await;
+                let dx = (mv[12].max(0.0) as f64).sqrt();
+                let dy = (mv[13].max(0.0) as f64).sqrt();
+                omega = crate::weight::update_primal_weight_movement(omega, dx, dy);
+                tau = (0.9 / (norm_a * omega)) as f32;
+                sigma = (0.9 * omega / norm_a) as f32;
+                for (ub, len) in [(&u_n, n), (&u_m, m)] {
+                    ctx.queue.write_buffer(
+                        ub,
+                        0,
+                        &ParamsData {
+                            n: len as u32,
+                            stride: wgs(len) * WG,
+                            tau,
+                            sigma,
+                            w: 0.0,
+                        }
+                        .bytes(),
+                    );
+                }
             }
             // ---- divergence detection (restart cadence only) ----
             let x_norm = vals[0] as f64;

@@ -198,8 +198,32 @@ which went from an unreadable parse error to a verified solve.
 set-name-less RHS line (a real-world MPS corner), and now it parses and solves
 to Optimal (−30.8119660669 against the optima-file −30.812149846, gap within
 the verified mu of 9.98e-5). The instances that don't reach Optimal stop
-honestly at the iteration cap — that's the documented f32 wall, reported as
-`IterationLimit`, never dressed up as a solve.
+honestly at the iteration cap, reported as `IterationLimit`, never dressed up
+as a solve.
+
+We used to attribute those 12 to the f32 iterates. That was wrong, and the
+correction is worth more than the original claim was. Re-solving all 12 on the
+CPU **f64** reference reproduces every failure — in double precision, where
+there is no 1e-4 floor to hit. What they actually show is step imbalance: one
+residual collapses to machine epsilon while the other stalls orders of
+magnitude above tolerance (agg: primal 1.6e-16 against dual 1.3e-2; sc205:
+primal 8.4e-17 against a gap of 0.77), and the stalled side flips between
+instances, so no single fixed step ratio can serve all of them. The explicit
+path runs with τ=σ and no primal weight, which is precisely the gap. An opt-in
+movement-based ω (PDLP's ‖Δy‖/‖Δx‖ rule) takes the same GPU sweep, at the same
+2M cap, from 20/32 to **30/32 with no status regressions**, and cuts total
+iterations across the already-solving instances by 5.2× (beaconfd alone goes
+1,680,896 → 10,432).
+
+It ships **off by default**, and the table above is the default-off run, because
+the headline undersells a real cost. Two of the newly-Optimal instances — lotfi
+and bnl1 — land 5.8e-2 and 1.2e-2 from the published optima. Both are honest
+`Optimal`: each passed the independent f64 KKT recheck at its returned point. But
+a KKT residual under 1e-4 does not tightly bound objective error on degenerate
+instances, and those two sit well outside the ≤1e-3 band every row in the table
+above occupies. Trading accuracy you can measure for a status count you can
+advertise is exactly the trade this project refuses to make silently, so the flag
+stays opt-in until that's a deliberate decision rather than a side effect.
 
 One footnote the report renders itself: **e226**. Its Netlib-readme "known
 optimum" uses the opposite sign convention for the objective-row RHS constant,
@@ -229,9 +253,15 @@ million-variable problem, and time it on your own GPU.
   double-double route is blocked on Apple/Metal until wgpu exposes a strict-math
   control (or you target a Vulkan/DX12 context, and even then the reduction
   pipeline needs df64 scratch buffers).
-- **Not every Netlib instance reaches Optimal in f32.** The `IterationLimit`
-  rows in the table are the f32 wall, stated as such. They are honest
-  non-solves, not silent failures.
+- **Not every Netlib instance reaches Optimal in the default configuration.**
+  The 12 `IterationLimit` rows are honest non-solves, not silent failures. We
+  originally called them the f32 wall; that was a misdiagnosis, and testing it
+  in f64 disproved it (Section 7). The real cause is an unweighted primal/dual
+  step split on the explicit path — a solver gap, not a precision limit. An
+  opt-in movement-based ω closes 10 of the 12 on the shipping GPU engine
+  (30/32, no status regressions), and we left it opt-in on purpose: two of the
+  instances it converts land 1–6% off the published optima, which is a worse
+  trade than the headline count suggests.
 - **No presolve.** We evaluated the recent GPU-presolve work (Cederberg & Boyd,
   arXiv 2604.23951) and deferred it: it only applies to the explicit-CSR path
   (not the matrix-free transport path), its wins concentrate in a minority of

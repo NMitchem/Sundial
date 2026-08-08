@@ -1,11 +1,11 @@
-//! Integral matching recovery for the taxi demo (Task 4a).
+//! Integral matching recovery for the taxi demo.
 //!
 //! The H3-scaled matching LP certifies `Optimal` on the GPU (~6 s full scale),
 //! but on the dense real fixture the optimal *face* is high-dimensional
 //! (real-data ties + 4-decimal rounding ⇒ hundreds of near-equidistant riders),
 //! so the objective-converged fractional plan does not read off a crisp pairing
-//! (only ~88/1024 riders are single-cab; see `.superpowers/sdd/task-4-report.md`
-//! Investigation). This module rounds that fractional plan to a genuine
+//! (only ~88/1024 riders are single-cab, measured on the real fixture). This
+//! module rounds that fractional plan to a genuine
 //! injective rider→cab assignment.
 //!
 //! **Honesty contract.** `recover_matching` makes NO optimality claim. The
@@ -40,7 +40,8 @@ use std::collections::BinaryHeap;
 
 /// Nearest cabs unioned into every rider's candidate set; the union guarantees
 /// a rider-perfect matching exists on the graph even if the LP support is thin.
-/// Binding contract (Task 4a brief): k = 8.
+/// k = 8 is a fixed contract, not a tuning knob: the tests that prove exact
+/// recovery on small instances depend on this value.
 const KNN: usize = 8;
 /// LP-support inclusion threshold, relative to the rider's row mass: entries
 /// this small are numerical dust from the f32 GPU iterate, not real support.

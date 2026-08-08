@@ -1,5 +1,5 @@
-// Matrix-free optimal-transport incidence operator (M1 plan "Math
-// conventions"). X ∈ R^(ns×nt) flattened row-major; A = [rows; cols].
+// Matrix-free optimal-transport incidence operator.
+// X ∈ R^(ns×nt) flattened row-major; A = [rows; cols].
 // Own uniform struct — auto pipeline layout keeps this independent of the
 // shared Params convention in pdhg.wgsl.
 struct TParams { ns: u32, nt: u32, n: u32, stride: u32 }

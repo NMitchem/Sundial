@@ -36,9 +36,12 @@ enum Cmd {
         max_iters: u64,
         #[arg(long)]
         json: bool,
-        /// Opt-in df64 (double-double) GPU accumulation (M2 experiment).
+        /// Opt-in df64 (double-double) GPU accumulation (experimental).
         #[arg(long)]
         df64: bool,
+        /// Opt-in movement-based primal weight, explicit path (experimental).
+        #[arg(long)]
+        movement_weight: bool,
     },
     /// Solve every *.mps / *.mps.gz in a directory, write a CSV
     Bench {
@@ -49,9 +52,14 @@ enum Cmd {
         engine: Engine,
         #[arg(long, default_value = "results.csv")]
         out: PathBuf,
-        /// Opt-in df64 (double-double) GPU accumulation (M2 experiment).
+        /// Opt-in df64 (double-double) GPU accumulation (experimental).
         #[arg(long)]
         df64: bool,
+        /// Opt-in movement-based primal weight, explicit path (experimental).
+        #[arg(long)]
+        movement_weight: bool,
+        #[arg(long, default_value_t = 2_000_000)]
+        max_iters: u64,
     },
     /// Render a bench results CSV + known optima into report.md
     Report {
@@ -61,7 +69,7 @@ enum Cmd {
         #[arg(long, default_value = "report.md")]
         out: PathBuf,
     },
-    /// Solve a generated optimal-transport instance (the M1 hero)
+    /// Solve a generated optimal-transport instance
     Transport {
         #[arg(long, default_value_t = 32)]
         grid: usize,
@@ -75,7 +83,7 @@ enum Cmd {
         max_iters: u64,
         #[arg(long)]
         json: bool,
-        /// Opt-in df64 (double-double) GPU accumulation (M2 experiment).
+        /// Opt-in df64 (double-double) GPU accumulation (experimental).
         #[arg(long)]
         df64: bool,
     },
@@ -119,6 +127,7 @@ fn solve_file(
     engine: Engine,
     quiet: bool,
     df64: bool,
+    movement_weight: bool,
 ) -> Result<Solution> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     let p =
@@ -127,6 +136,7 @@ fn solve_file(
         tol,
         max_iters,
         df64,
+        movement_weight,
         ..Default::default()
     };
     let mut on_progress = |e: ProgressEvent| {
@@ -166,8 +176,9 @@ fn main() -> Result<()> {
             max_iters,
             json,
             df64,
+            movement_weight,
         } => {
-            let sol = solve_file(&file, tol, max_iters, engine, json, df64)?;
+            let sol = solve_file(&file, tol, max_iters, engine, json, df64, movement_weight)?;
             let name = file.file_stem().unwrap_or_default().to_string_lossy();
             if json {
                 println!("{}", serde_json::to_string_pretty(&report(&name, &sol))?);
@@ -195,6 +206,8 @@ fn main() -> Result<()> {
             engine,
             out,
             df64,
+            movement_weight,
+            max_iters,
         } => {
             let mut rows = vec![
                 "name,status,objective,iterations,solve_ms,rel_primal,rel_dual,rel_gap".to_string(),
@@ -216,7 +229,7 @@ fn main() -> Result<()> {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-                match solve_file(&f, tol, 2_000_000, engine, true, df64) {
+                match solve_file(&f, tol, max_iters, engine, true, df64, movement_weight) {
                     Ok(s) => {
                         let r = report(&name, &s);
                         println!(

@@ -334,3 +334,58 @@ fn grid_stride_covers_beyond_dispatch_cap() {
         "tail beyond 1_048_576 not covered"
     );
 }
+
+// The movement-ω reduction. Two guards in one: it matches an f64 ‖a−b‖² at
+// 1M elements (grid-stride path), and — the case that actually matters at a
+// restart — it stays accurate when a and b are NEIGHBOURING iterates, where
+// the difference is many orders below the operands and a naive
+// subtract-then-dot in f32 would lose it.
+#[test]
+#[ignore = "requires GPU"]
+fn reduce_diff_sq_matches_f64_including_near_identical_inputs() {
+    let c = ctx();
+    let k = kernels::Kernels::new(&c.device);
+    let n = 1_000_000usize;
+    let mut rng = fastrand::Rng::with_seed(23);
+    let a: Vec<f32> = (0..n).map(|_| rng.f32() * 2.0 - 1.0).collect();
+
+    // (1) well-separated inputs
+    let b: Vec<f32> = (0..n).map(|_| rng.f32() * 2.0 - 1.0).collect();
+    let red = kernels::Reducer::new(&c.device, n);
+    let ba = buffers::storage_f32(&c.device, &a, "a");
+    let bb = buffers::storage_f32(&c.device, &b, "b");
+    let got = pollster::block_on(red.diff_sq(&c, &k, &ba, &bb, n)) as f64;
+    let want: f64 = a
+        .iter()
+        .zip(&b)
+        .map(|(&x, &y)| {
+            let d = x as f64 - y as f64;
+            d * d
+        })
+        .sum();
+    assert!(
+        (got - want).abs() <= 1e-3 * (1.0 + want.abs()),
+        "separated: gpu {got} vs f64 {want}"
+    );
+
+    // (2) near-identical inputs — the restart regime
+    let b2: Vec<f32> = a.iter().map(|&x| x + 1e-5).collect();
+    let bb2 = buffers::storage_f32(&c.device, &b2, "b2");
+    let got2 = pollster::block_on(red.diff_sq(&c, &k, &ba, &bb2, n)) as f64;
+    let want2: f64 = a
+        .iter()
+        .zip(&b2)
+        .map(|(&x, &y)| {
+            let d = x as f64 - y as f64;
+            d * d
+        })
+        .sum();
+    assert!(
+        got2 > 0.0,
+        "near-identical inputs collapsed to zero movement (gpu {got2})"
+    );
+    assert!(
+        (got2 - want2).abs() <= 5e-2 * want2,
+        "near-identical: gpu {got2} vs f64 {want2}"
+    );
+}

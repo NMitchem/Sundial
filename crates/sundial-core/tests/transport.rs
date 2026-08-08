@@ -69,6 +69,22 @@ fn new_preset_names_parse() {
 }
 
 #[test]
+fn checker_source_and_target_are_complementary_boards() {
+    // Checker's contract: the target is the INVERTED board, so every cell
+    // carries mass on exactly one side. Pins the parity semantics against a
+    // refactor that inverts or drops a branch (density() is private, so this
+    // has to read through masses(); empty cells sit at the 1e-9 floor).
+    let g = 4;
+    let (src, tgt) = transport::masses(Preset::Checker, g);
+    for k in 0..g * g {
+        let (s_hot, t_hot) = (src[k] > 0.01, tgt[k] > 0.01);
+        assert!(s_hot != t_hot, "cell {k}: src {} tgt {}", src[k], tgt[k]);
+        // and the board really alternates, rather than being any complementary pair
+        assert_eq!(s_hot, (k % g + k / g).is_multiple_of(2), "cell {k}");
+    }
+}
+
+#[test]
 fn problem_dimensions_and_bounds() {
     let p = transport::problem(Preset::Blobs, 4);
     assert_eq!(p.n_vars(), 256); // (4²)²
@@ -153,6 +169,23 @@ fn all_zero_masses_become_uniform() {
     let first = p.row_lower[0];
     assert!(p.row_lower[..16].iter().all(|&v| (v - first).abs() < 1e-15));
     assert!((first - 1.0 / 16.0).abs() < 1e-12);
+}
+
+#[test]
+fn sub_floor_positive_masses_are_floored_like_zeros() {
+    // The 1e-9 floor is documented to apply to EVERY cell, not only the
+    // junk-rejected ones. A sub-floor positive mass is just as degenerate a
+    // zero-mass equality row as an exact 0.0, so both must clean to the same
+    // value — otherwise a hand-drawn canvas with a near-zero stroke builds a
+    // problem the floor was meant to make impossible.
+    let mut tiny = vec![1.0f64; 16];
+    tiny[0] = 1e-20;
+    let mut zero = vec![1.0f64; 16];
+    zero[0] = 0.0;
+    let uniform = vec![1.0f64; 16];
+    let p_tiny = transport::problem_from_masses(&tiny, &uniform, 4).unwrap();
+    let p_zero = transport::problem_from_masses(&zero, &uniform, 4).unwrap();
+    assert_eq!(p_tiny.row_lower, p_zero.row_lower);
 }
 
 #[test]

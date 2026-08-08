@@ -1,5 +1,5 @@
-//! df64 accumulator experiment (M2 Task 5) — see `docs/notes/df64-experiment.md`
-//! for the full write-up and the accuracy claim.
+//! df64 accumulator experiment — see `docs/notes/df64-experiment.md` for the
+//! full write-up and the accuracy claim.
 use sundial_core::gpu::kernels::{Kernels, Reducer};
 use sundial_core::gpu::{buffers, GpuContext};
 

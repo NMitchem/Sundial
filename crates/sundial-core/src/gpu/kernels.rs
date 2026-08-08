@@ -39,6 +39,7 @@ const TABLE: &[(&str, &str)] = &[
     ("reduce", "reduce_dot"),
     ("reduce", "reduce_sum"),
     ("reduce", "reduce_maxabs"),
+    ("reduce", "reduce_diff_sq"),
     ("transport", "ot_apply"),
     ("transport", "ot_apply_t"),
     ("df64", "spmv_df64"),
@@ -188,8 +189,8 @@ impl Reducer {
             let ubuf = buffers::uniform_bytes(dev, &params.bytes(), "reduce_params");
             let pl = k.pipeline(entry);
             let mut e: Vec<(u32, &wgpu::Buffer)> = vec![(0, &ubuf), (1, src), (6, dst)];
-            if entry.starts_with("reduce_dot") {
-                e.push((2, b.expect("dot needs b")));
+            if entry.starts_with("reduce_dot") || entry.starts_with("reduce_diff_sq") {
+                e.push((2, b.expect("two-input reduction needs b")));
             }
             let bg = bind(dev, pl, &e);
             pass_dispatch(enc, pl, &bg, wgs);
@@ -233,6 +234,35 @@ impl Reducer {
             slot,
         );
     }
+    /// ‖a − b‖² into `results[slot]` (take the sqrt on the host). Note the
+    /// follow-up passes are plain `reduce_sum`: only the FIRST pass differences,
+    /// after which it is an ordinary sum of partials.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_diff_sq(
+        &self,
+        dev: &wgpu::Device,
+        enc: &mut wgpu::CommandEncoder,
+        k: &Kernels,
+        a: &wgpu::Buffer,
+        b: &wgpu::Buffer,
+        n: usize,
+        results: &wgpu::Buffer,
+        slot: u32,
+    ) {
+        self.record(
+            dev,
+            enc,
+            k,
+            "reduce_diff_sq",
+            a,
+            Some(b),
+            n,
+            "reduce_sum",
+            results,
+            slot,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn record_sum(
         &self,
@@ -320,6 +350,18 @@ impl Reducer {
         n: usize,
     ) -> f32 {
         self.run(ctx, k, "reduce_dot", a, Some(b), n, "reduce_sum")
+            .await
+    }
+    /// ‖a − b‖² (host takes the sqrt).
+    pub async fn diff_sq(
+        &self,
+        ctx: &GpuContext,
+        k: &Kernels,
+        a: &wgpu::Buffer,
+        b: &wgpu::Buffer,
+        n: usize,
+    ) -> f32 {
+        self.run(ctx, k, "reduce_diff_sq", a, Some(b), n, "reduce_sum")
             .await
     }
     pub async fn sum(&self, ctx: &GpuContext, k: &Kernels, a: &wgpu::Buffer, n: usize) -> f32 {

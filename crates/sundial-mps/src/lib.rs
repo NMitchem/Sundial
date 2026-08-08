@@ -85,7 +85,7 @@ pub fn parse_str(text: &str) -> Result<LpProblem, MpsError> {
                         name = toks[1].to_string();
                     }
                 }
-                "OBJSENSE" => return Err(err(lineno, "OBJSENSE unsupported in M0 (MIN only)")),
+                "OBJSENSE" => return Err(err(lineno, "OBJSENSE unsupported (MIN only)")),
                 "ROWS" => section = Section::Rows,
                 "COLUMNS" => section = Section::Columns,
                 "RHS" => section = Section::Rhs,

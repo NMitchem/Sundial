@@ -176,7 +176,7 @@ fn dominant_assignment_survives_ties() {
 }
 
 // ---------------------------------------------------------------------------
-// Integral recovery (Task 4a). At n ≤ 7 with nt ≤ 8 the kNN(8) candidate set
+// Integral recovery. At n ≤ 7 with nt ≤ 8 the kNN(8) candidate set
 // contains every cab, so the graph is complete and recovery is EXACTLY optimal
 // — comparable to the brute-force min-cost matching.
 // ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ fn recovery_is_deterministic() {
 }
 
 // ---------------------------------------------------------------------------
-// Certified floor (Task 4a fix-round): a rigorous CPU-f64 lower bound on the
+// Certified floor: a rigorous CPU-f64 lower bound on the
 // (unscaled, mass-1) matching optimum via a repaired feasible dual. Valid for
 // ANY input dual `y` (feasibility is reconstructed), tight when `y` is good.
 // Masses are the H3-scaled values (rider_mass = cab_cap = 1/nt).

@@ -1,7 +1,9 @@
-//! Discrete optimal transport between two g×g grids as an LP — the M1 hero.
+//! Discrete optimal transport between two g×g grids as an LP.
 //! Constraint matrix is MATRIX-FREE (row/col sums via `TransportOp`); the
-//! cost VECTOR is materialized (in-shader cost is M2 — adjudication in the
-//! M1 plan). Cells: idx = row*g + col, center ((col+0.5)/g, (row+0.5)/g).
+//! cost VECTOR is materialized, which is what caps the grid size — at g=64
+//! (16.7M variables) the cost vector alone is 67 MiB, so going larger needs
+//! the cost computed in-shader. Cells: idx = row*g + col, center
+//! ((col+0.5)/g, (row+0.5)/g).
 use crate::linop::LinOp;
 use crate::problem::{CsrMatrix, LpProblem, OpProblem, ProblemError};
 
@@ -108,20 +110,16 @@ fn density(preset: Preset, source: bool, px: f64, py: f64) -> f64 {
                 0.0
             }
         }
-        (Preset::Checker, true) => {
-            // 4×4 checkerboard, "black" squares carry the mass
-            if ((px * 4.0).floor() as i64 + (py * 4.0).floor() as i64) % 2 == 0 {
+        (Preset::Checker, _) => {
+            // 4×4 checkerboard: "black" squares carry the source mass and the
+            // target is the inverted board, so a single parity test serves both
+            // sides — the target is just the side where parity and `source`
+            // disagree.
+            let black = ((px * 4.0).floor() as i64 + (py * 4.0).floor() as i64) % 2 == 0;
+            if black == source {
                 1.0
             } else {
                 0.0
-            }
-        }
-        (Preset::Checker, false) => {
-            // the inverted board
-            if ((px * 4.0).floor() as i64 + (py * 4.0).floor() as i64) % 2 == 0 {
-                0.0
-            } else {
-                1.0
             }
         }
         (Preset::Corners, true) => {
@@ -206,9 +204,14 @@ pub fn problem_from_masses(
         )));
     }
     let clean = |v: &[f64]| -> Vec<f64> {
+        // Parens are load-bearing for readers, not for the compiler: an `if` in
+        // expression position already chains `.max` onto the whole if/else (so
+        // the floor applies to junk AND to sub-floor positives alike), but the
+        // unparenthesized form reads as if `.max` bound to the else-branch `0.0`
+        // only. Pinned by `sub_floor_positive_masses_are_floored_like_zeros`.
         let mut out: Vec<f64> = v
             .iter()
-            .map(|&x| if x.is_finite() && x > 0.0 { x } else { 0.0 }.max(1e-9))
+            .map(|&x| (if x.is_finite() && x > 0.0 { x } else { 0.0 }).max(1e-9))
             .collect();
         let sum: f64 = out.iter().sum();
         out.iter_mut().for_each(|x| *x /= sum);
@@ -245,8 +248,7 @@ pub fn matching_mass(nt: usize) -> f64 {
 ///
 /// **Masses are scaled by `1/nt`** (rider equality mass `1/nt`, cab capacity
 /// `[0, 1/nt]`) rather than the natural `[1,1]/[0,1]`. This is a convergence
-/// fix, not a cosmetic one — see `.superpowers/sdd/task-4-report.md`
-/// Investigation (H3, measured). PDLP seeds its primal weight
+/// fix, not a cosmetic one. PDLP seeds its primal weight
 /// `ω₀ = ‖c‖/‖q‖`; the rhs norm `q_norm = √(ns+nt)` at unit masses leaves
 /// `ω₀ ≈ 13`, far below its `1e4` clamp, so the dual side is under-driven and
 /// the duality gap plateaus at ~2.5e-4 (the full-scale fixture terminated

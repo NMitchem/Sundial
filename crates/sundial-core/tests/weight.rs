@@ -1,4 +1,7 @@
-use sundial_core::weight::{initial_primal_weight, update_primal_weight, OMEGA_MAX, OMEGA_MIN};
+use sundial_core::weight::{
+    initial_primal_weight, update_primal_weight, update_primal_weight_movement, OMEGA_MAX,
+    OMEGA_MIN,
+};
 
 #[test]
 fn initial_weight_is_cost_over_rhs_scale() {
@@ -52,4 +55,50 @@ fn update_is_identity_on_balance_and_degenerate_inputs() {
 fn update_clamps() {
     assert_eq!(update_primal_weight(OMEGA_MAX, 1e-2, 1e-9), OMEGA_MAX);
     assert_eq!(update_primal_weight(OMEGA_MIN, 1e-9, 1e-2), OMEGA_MIN);
+}
+
+// ---- movement-based ω (experimental) ----
+
+#[test]
+fn movement_update_contracts_toward_the_movement_ratio() {
+    // THE crux of this rule. The residual-ratio update multiplies ω by the full
+    // damped ratio at every restart, so it has no fixed point unless the
+    // residuals happen to balance — the suspected mechanism behind the limit
+    // cycle observed on the equilibrated path (ω orbited 0.02↔0.12).
+    // The movement rule is a contraction in log space: under a steady movement
+    // ratio ω must CONVERGE to it, not orbit it.
+    let (dx, dy) = (1.0, 8.0); // target ω = Δy/Δx = 8
+    let mut w = 1e-3;
+    for _ in 0..60 {
+        w = update_primal_weight_movement(w, dx, dy);
+    }
+    assert!((w - 8.0).abs() < 1e-9, "w={w}");
+}
+
+#[test]
+fn movement_update_is_the_geometric_mean_of_omega_and_the_ratio() {
+    // θ = 0.5 ⇒ one step lands exactly on √(ω · Δy/Δx)
+    let w = update_primal_weight_movement(2.0, 1.0, 8.0);
+    assert!((w - 16.0f64.sqrt()).abs() < 1e-12, "w={w}");
+}
+
+#[test]
+fn movement_update_is_identity_on_degenerate_movement() {
+    // a restart that moved nothing carries no information about step balance
+    assert_eq!(update_primal_weight_movement(3.0, 0.0, 1.0), 3.0);
+    assert_eq!(update_primal_weight_movement(3.0, 1.0, 0.0), 3.0);
+    assert_eq!(update_primal_weight_movement(3.0, f64::NAN, 1.0), 3.0);
+    assert_eq!(update_primal_weight_movement(3.0, 1.0, f64::INFINITY), 3.0);
+}
+
+#[test]
+fn movement_update_clamps() {
+    assert_eq!(
+        update_primal_weight_movement(OMEGA_MAX, 1e-8, 1.0),
+        OMEGA_MAX
+    );
+    assert_eq!(
+        update_primal_weight_movement(OMEGA_MIN, 1.0, 1e-8),
+        OMEGA_MIN
+    );
 }

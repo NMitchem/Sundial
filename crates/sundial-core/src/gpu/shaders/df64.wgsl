@@ -1,8 +1,9 @@
 // Double-double (two-f32) accumulation variants of the accumulation-critical
-// kernels (M2 df64 experiment). A df64 value is vec2<f32>(hi, lo) with
+// kernels (experimental). A df64 value is vec2<f32>(hi, lo) with
 // |lo| ≤ ulp(hi)/2. Only ACCUMULATORS are df64; inputs/outputs stay f32.
 // Error-free transforms (Knuth two_sum, fma-based two_prod) — these depend
-// on IEEE-exact f32 ops; see the plan's fast-math risk note.
+// on IEEE-exact f32 ops, which Metal's forced fast-math does not provide —
+// see docs/notes/df64-experiment.md.
 struct Params { n: u32, stride: u32, tau: f32, sigma: f32, w: f32, p0: f32, p1: f32, p2: f32 }
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> in_a: array<f32>;

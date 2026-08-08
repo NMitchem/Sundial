@@ -165,7 +165,7 @@ fn rhs_set_name_less_unknown_row_is_an_error() {
 
 #[test]
 fn repeated_up_lines_reset_negativity() {
-    // M1-review hardening: UP -2 then UP +5 must NOT leave lower at -inf
+    // UP -2 then UP +5 must NOT leave lower at -inf
     let p = sundial_mps::parse_str(
         "NAME t\nROWS\n N obj\n L r1\nCOLUMNS\n x obj 1.0 r1 1.0\nRHS\n rhs r1 5.0\nBOUNDS\n UP bnd x -2.0\n UP bnd x 5.0\nENDATA\n",
     )
