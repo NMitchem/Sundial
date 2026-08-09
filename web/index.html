@@ -1,9 +1,38 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sundial — 1M-variable optimal transport on your GPU</title>
+    <title>Sundial: 1M-variable optimal transport on your GPU</title>
+    <meta name="description" content="A linear-programming solver that runs as WebGPU compute shaders. Solve a 1,048,576-variable optimal-transport instance in a browser tab, on your own GPU, with every tolerance re-verified on the CPU in f64." />
+    <link rel="canonical" href="https://noahmitchem.com/sundial/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://noahmitchem.com/sundial/" />
+    <meta property="og:title" content="Sundial: 1M-variable optimal transport on your GPU" />
+    <meta property="og:description" content="A million-variable linear program, solved in a browser tab on your own GPU in about nine seconds. No server, no install, no CUDA." />
+    <meta property="og:image" content="https://noahmitchem.com/sundial/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Sundial: 1M-variable optimal transport on your GPU" />
+    <meta name="twitter:description" content="A million-variable linear program, solved in a browser tab on your own GPU in about nine seconds. No server, no install, no CUDA." />
+    <meta name="twitter:image" content="https://noahmitchem.com/sundial/og-image.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Sundial",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any browser with WebGPU",
+        "url": "https://noahmitchem.com/sundial/",
+        "description": "A linear-programming solver that runs as WebGPU compute shaders, natively and in the browser. Solves a 1,048,576-variable optimal-transport instance in a browser tab, with every tolerance re-verified on the CPU in f64.",
+        "license": "https://spdx.org/licenses/MIT.html",
+        "author": { "@type": "Person", "name": "Noah Mitchem", "url": "https://noahmitchem.com" },
+        "codeRepository": "https://github.com/NMitchem/Sundial",
+        "programmingLanguage": ["Rust", "WGSL", "TypeScript"],
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
     <style>
       body { font: 14px/1.5 system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
       #hud span { display: inline-block; margin-right: 1.2rem; font-variant-numeric: tabular-nums; }
