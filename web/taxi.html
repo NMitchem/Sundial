@@ -32,14 +32,16 @@
   <body>
     <h1>Every open ride in Manhattan, dispatched perfectly</h1>
     <p id="caption">
-      Manhattan — Friday, June 5, 2015, 6:03&nbsp;PM.
+      Manhattan. Friday, June 5, 2015, 6:03&nbsp;PM.
       <b>1,024</b> open ride requests (white), <b>1,152</b> free cabs (yellow).
-      Real positions from the public NYC&nbsp;TLC record — the last era with exact GPS
+      Real positions from the public NYC&nbsp;TLC record, the last era with exact GPS
       coordinates in the data. Free-cab positions are the previous 12 minutes' drop-offs.
+      Assigning every cab to a rider at once, for the fewest total miles, is a linear
+      program with over a million variables: one per possible cab-and-rider pairing.
     </p>
     <div id="nogpu">
-      <p>This browser has no WebGPU (Chrome/Edge 113+, Firefox 141+, or Safari 26+ required)
-         — here is what it looks like:</p>
+      <p>This browser has no WebGPU, so it can't run the solve. You'll need Chrome/Edge 113+,
+         Firefox 141+, or Safari 26+. Here's what it looks like:</p>
       <video src="taxi/loop.mp4" poster="taxi/poster.png" autoplay muted loop playsinline
              onerror="this.style.display='none'"
              style="max-width:100%; border-radius:8px"></video>
@@ -63,8 +65,9 @@
     <footer>
       Solved live by <a href="index.html">Sundial</a>, an LP solver running as WebGPU compute
       shaders in your browser. "Optimal" is only ever claimed after an independent CPU-f64
-      re-verification of the exact returned answer. Distances are straight-line; "free cab"
-      is a drop-off-based proxy. Nothing leaves your machine.
+      re-verification of the exact answer returned. Two caveats worth naming: distances are
+      straight-line, and "free cab" is a proxy built from recent drop-offs. Nothing leaves
+      your machine.
     </footer>
     <script type="module" src="/src/taxi/main-taxi.ts"></script>
   </body>

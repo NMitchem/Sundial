@@ -1,298 +1,297 @@
 # I solved a 1,048,576-variable optimization problem in a browser tab, on any GPU
 
-*Show HN draft — Sundial, a linear-programming solver that runs as WebGPU compute shaders.*
+*Show HN draft for Sundial, a linear-programming solver that runs as WebGPU compute shaders.*
 
 Live demo: <DEMO_URL>
 
 ---
 
-## 1. The hook
+Every GPU linear-programming solver shipped in the last two years runs on CUDA.
+cuPDLP is CUDA-only. NVIDIA's cuOpt is CUDA. HiGHS shipped a GPU path in April
+2026, and it runs on an NVIDIA GPU, Linux and Windows. Meanwhile every LP
+solver that runs in a browser (clp-wasm, highs-js, YALPS) is a CPU port of
+simplex-era code, and Google's own OR-Tools WASM port documents that its
+GPU-dependent code doesn't survive the trip.
 
-Open a web page. Pick a grid size. Watch a 1,048,576-variable linear program
-converge to an optimal solution on your own laptop's GPU — no install, no
-sign-up, no server doing the work for you, and no NVIDIA card required. It
-runs on Apple, AMD, Intel, and NVIDIA alike, because it's built on WebGPU
-compute shaders instead of CUDA.
+So the two lists never overlap.
 
-The demo problem is optimal transport: move the mass of one 32×32 image onto
-another as cheaply as possible. That's 1,024 sources × 1,024 sinks =
-1,048,576 transport variables and 2,048 marginal constraints. On an Apple M4
-Pro it solves to a verified 1e-4 tolerance in about 9.4 seconds natively, and
-in the same ballpark inside a browser tab. Every "Optimal" you see was
-re-checked in double precision on the CPU before the word was allowed to
-appear — more on that below, because it's the part that matters.
+Sundial is 1,048,576 variables in **9.4 seconds**, on an Apple laptop, in a tab.
 
-## 2. Why this didn't exist yet
+## The gap nobody was standing in
 
 Linear programming had a GPU moment over the last two years. First-order
-methods — PDLP from Google, then cuPDLP, then NVIDIA's cuOpt, and as of April
-2026 even HiGHS's new GPU path ("HiPDLP") — showed that you can solve very
-large LPs on a GPU by doing nothing but sparse matrix-vector products and
-vector reductions, no matrix factorization anywhere. The catch: every one of
-those implementations is CUDA. cuPDLP-C is CUDA-only (it even ships an
-official single-precision `SFLOAT` build flag, which is what told us f32 was a
-supported mode and not a research gamble). HiGHS's GPU path "runs on an NVIDIA
-GPU," Linux and Windows only. MPAX is vendor-portable but it's a Python/XLA
-install. The lock-in has been *deepening*, not resolving.
+methods showed you can solve very large LPs with nothing but sparse
+matrix-vector products and vector reductions, no matrix factorization anywhere.
+PDLP came out of Google, then cuPDLP, then cuOpt, then HiPDLP. The math is
+settled and public.
 
-Meanwhile, the solvers that *do* run in a browser — clp-wasm, highs-js, YALPS
-— are all CPU WASM ports of simplex-era code. Google's own OR-Tools WASM port
-documents that its GPU-dependent code doesn't survive the port to the browser.
+The distribution isn't. cuPDLP-C even ships an official single-precision
+`SFLOAT` build flag, which is how we knew f32 was a supported mode and not a
+research gamble. It's still CUDA. MPAX is vendor-portable, and it's a
+Python/XLA install. The lock-in has been deepening, not resolving.
 
-So there was a gap with nobody in it: GPU-parallel LP × any GPU vendor ×
-zero-install browser execution. Two independent prior-art sweeps ("WebGPU
-linear programming," "WebGPU PDHG," "WGSL optimization solver," GitHub topic
-crosses, arXiv, HN) turned up zero hits. WebGPU is what changes the
-constraint: it's the first portable GPU-compute API that ships in browsers and
-runs natively through the same `wgpu` stack. Sundial is restarted PDHG (the
-PDLP algorithm family) written in f32 WGSL, and it runs unmodified both
-natively and in the tab.
+Two independent prior-art sweeps ("WebGPU linear programming," "WebGPU PDHG,"
+"WGSL optimization solver," GitHub topic crosses, arXiv, HN) turned up zero
+hits on the intersection: GPU-parallel LP, any GPU vendor, zero-install browser
+execution.
 
-## 3. The honesty machinery (the part that matters)
+WebGPU is what moved. It's the first portable GPU-compute API that ships in
+browsers and runs natively through the same `wgpu` stack, so one codebase
+covers Metal, Vulkan, DX12, and the tab. Sundial is restarted PDHG in f32 WGSL,
+and it runs unmodified in all four.
 
-A GPU LP solver in f32 has an obvious credibility problem: single precision is
-noisy, first-order methods crawl toward their tolerance, and it's very easy to
-declare victory a little early. Sundial's answer is a rule we never break:
-**the GPU never grades its own homework.**
+## The GPU never grades its own homework
 
-The GPU iterates in f32 and *flags* when it thinks it's done. But `Optimal` is
-only ever set after a completely separate check: the returned primal-dual
+An f32 GPU solver has an obvious credibility problem. Single precision is
+noisy, first-order methods crawl toward their tolerance, and declaring victory
+a little early is easy and completely invisible from the outside.
+
+So there's one rule. The GPU iterates and the GPU nominates. It never sets a
+status.
+
+`Optimal` is only ever set after a separate check: the returned primal-dual
 point is re-evaluated against the full KKT conditions in f64 on the CPU, and
-the returned solution *is* that verified point. The duality gap in that check
-is evaluated at a sign-projected dual, so on standard-form problems the gap is
-genuinely enforced rather than silently dropped (an unprojected multiplier can
-send an f64 term to ±infinity and quietly turn the gap into a NaN that falls
-out of the certificate — we hit exactly that and fixed it).
+the solution you get back *is* that verified point. The duality gap in that
+check is evaluated at a sign-projected dual, so on standard-form problems the
+gap is genuinely enforced rather than silently dropped. That last detail is not
+theoretical. An unprojected multiplier sends an f64 term to infinity and turns
+the gap into a NaN that falls out of the certificate entirely. We hit exactly
+that, and fixed it.
 
-M2 extended the same discipline to the two other things an LP can be. Sundial
-now detects **Infeasible** and **Unbounded** — but only after a CPU-f64 Farkas
-certificate (a dual ray for infeasibility, a primal recession ray for
-unboundedness) verifies it. The GPU engine only nominates a candidate when the
-iterate norm keeps growing across restarts; the f64 certificate is the sole
-authority that gets to set the status. A false "Infeasible" is therefore
-structurally impossible in the same way a false "Optimal" is.
+The same discipline covers the other two things an LP can be. `Infeasible` and
+`Unbounded` are set only after a CPU-f64 Farkas certificate verifies them: a
+dual ray for infeasibility, a primal recession ray for unboundedness. The GPU
+engine nominates a candidate when the iterate norm keeps growing across
+restarts. The f64 certificate is the only authority that gets to set the
+status, so a false `Infeasible` is structurally impossible in the same way a
+false `Optimal` is.
 
-Getting the *nomination* heuristic right had a nice subtlety. Our first cut
-watched for *geometric* growth in the iterate norm. It never fired — and there
-was a reason. PDHG divergence is *linear*: the iterate difference converges to
-a fixed ray (Applegate et al.), so the ratio between successive restarts
-decays toward 1 and a geometric threshold can't sustain a streak by
-construction. We switched to a monotonic-with-margin test (each restart's norm
-at least 1.02× the last), which is just a noise margin, not a growth rate.
+Getting the nomination heuristic right had a nice subtlety. The first cut
+watched for *geometric* growth in the iterate norm, and it never fired once.
+There's a reason for that. PDHG divergence is linear: the iterate difference
+converges to a fixed ray (Applegate et al.), so the ratio between successive
+restarts decays toward 1 and a geometric threshold can't sustain a streak by
+construction. We switched to monotonic-with-margin, where each restart's norm
+has to be at least 1.02× the last. That's a noise margin, not a growth rate.
 Because the f64 certificate is still the only thing that can set a status, this
-constant can only ever change *when* we attempt verification, never *whether* a
-wrong answer slips through. On constructed infeasible/unbounded oracles the
-certificate fires at about 12.4k iterations.
+constant can only change *when* we attempt verification, never *whether* a
+wrong answer gets through. On constructed oracles the certificate fires at
+about 12,400 iterations.
 
-In the field, the detector is deliberately conservative, and the honest
-recall number reflects that. On Netlib's real infeasible set, **2 of 6
-instances certify Infeasible** (itest2 and galenet); the other **4 stop at an
-honest `IterationLimit`**, and — the number that actually matters — **zero
-produced a false `Optimal`**. That trade is on purpose: a missed detection
-costs you some iterations, a false claim would cost you trust, and the whole
-architecture is built so the false-claim direction is structurally impossible.
-We'd rather report "I couldn't decide" than "solved" when we can't prove it.
+In the field the detector is deliberately conservative, and the recall number
+says so. On Netlib's real infeasible set, **2 of 6 instances certify**
+(itest2 and galenet). The other **4 stop at an honest `IterationLimit`**. And
+the number that actually matters: **zero produced a false `Optimal`**.
 
-## 4. The war story: the million-variable gate that stalled at half a million iterations
+That trade is on purpose. A missed detection costs you iterations. A false
+claim costs you trust, and the whole architecture is built so the false-claim
+direction can't happen. We'd rather report "I couldn't decide" than "solved."
 
-The 1M-variable transport problem did not work the first time, and the way it
+## The million-variable gate that stalled at half a million iterations
+
+The 1M-variable transport problem did not work the first time, and how it
 failed is the most instructive thing in the project.
 
-With the textbook PDHG step sizes (τ = σ), the solver ran to its iteration cap
-— 500,032 iterations, about 290 seconds — and stopped at a verified mu of
-1.23e-4, just past the 1e-4 line. Reading the residual curves explained why:
-the **dual** residual had collapsed to about 1e-9, essentially converged,
-while the **primal** residual sat on a plateau around 1e-4 and would not come
-down. The two sides of the problem were progressing at wildly different rates
-and the single shared step size couldn't serve both.
+With textbook PDHG step sizes (τ = σ), the solver ran to its iteration cap:
+500,032 iterations, about 290 seconds, stopping at a verified µ of 1.23e-4.
+Just past the 1e-4 line. Maddening.
 
-The fix is PDLP's primal-weight balancing: introduce a weight ω that
-rebalances the primal and dual step sizes, initialize it from the ratio of the
-cost and constraint norms in iterate space, and nudge it at each restart to
-equalize the two residuals (a √-damped residual-balance update, ω clamped to
-[1e-4, 1e4]). With ω in place the same problem converges in **16,000
-iterations, 9 restarts, about 9.4 seconds**, verified mu 9.83e-5.
+The residual curves explained it. The **dual** residual had collapsed to about
+1e-9, essentially converged. The **primal** residual sat on a plateau around
+1e-4 and would not come down. Two sides of the same problem, progressing at
+wildly different rates, sharing one step size that could only serve one of
+them.
 
-One honest wrinkle we wrote down rather than hid: ω only helps on the
-matrix-free/unscaled path. On the explicit path (Ruiz + preconditioner
-equilibration already applied), the residual-ratio update limit-cycled between
-about 0.02 and 0.12 and actually regressed one instance, so there we kept the
-original τ = σ behavior, which we proved bit-identical to the pre-ω code.
-Movement-based weighting for that path is on the backlog. The screenshots in
-the demo reproduce the good curve live: dual dropping fast, primal following
-once ω kicks in.
+The fix is PDLP's primal-weight balancing. Introduce a weight ω that rebalances
+the primal and dual step sizes, initialize it from the ratio of the cost and
+constraint norms in iterate space, and nudge it at each restart to equalize the
+two residuals. With ω in place the same problem converges in **16,000
+iterations, 9 restarts, about 9.4 seconds**, at a verified µ of 9.83e-5.
 
-## 5. What the browser costs you
+That's 31× fewer iterations from a change that touches two scalars.
 
-Almost nothing, at this scale. The native run does about 0.59 ms per iteration
-on the M4 Pro. The same code compiled to wasm and driven through the browser's
-WebGPU does about 0.547 ms per iteration — within measurement noise of native,
-which is to say the browser is effectively free here. The 32×32 (1,048,576
-variable) problem reaches `Optimal (CPU f64 verified)` in the tab at 16,000
-iterations; the 16×16 problem (65,536 variables) lands in about one second.
+One wrinkle we wrote down instead of hiding: ω only helps on the
+matrix-free/unscaled path. On the explicit path, where Ruiz and Pock–Chambolle
+equilibration already ran, the residual-ratio update limit-cycled between about
+0.02 and 0.12 and regressed an instance. So that path keeps τ = σ, which we
+proved bit-identical to the pre-ω code. Section 7 is what eventually came of
+that gap.
 
-That result is not a foregone conclusion — WebGPU has storage-buffer size
-limits and driver quirks, and a fair amount of the engineering was staying
-inside the portable WGSL subset (no subgroups, no f16/f64, ±1e30 sentinels
-instead of infinity arithmetic so nothing depends on a browser honoring IEEE
-inf). But once you're inside that subset, the GPU is the GPU, tab or no tab.
+## The browser is free
 
-## 6. The double-double experiment, and why it's a *negative* result
+Native runs at about 0.59 ms per iteration on the M4 Pro. The same code
+compiled to wasm and driven through the browser's WebGPU runs at about
+**0.547 ms**. That's inside measurement noise, which is to say the tab costs
+you nothing at this scale. The 32×32 problem reaches `Optimal (CPU f64
+verified)` in the browser at 16,000 iterations. The 16×16 problem, 65,536
+variables, lands in about a second.
 
-The original pitch promised a "double-double f32" trick — emulate ~46 bits of
-mantissa by carrying each number as a hi/lo pair of f32s — to push past the
-1e-4 tier. We built it (behind a `--df64` flag, default off) and then wrote a
-kernel-level test designed to *falsify* it: an adversarial cancellation dot
-product with a known f64 ground truth. It falsified it. On Apple/Metal, df64
-and plain f32 accumulation came out **byte-identical** — same error, 7.552e0,
-to the digit.
+That wasn't a foregone conclusion. WebGPU has storage-buffer size limits and
+driver quirks, and a real share of the engineering went into staying inside the
+portable WGSL subset: no subgroups, no f16, no f64, and ±1e30 sentinels instead
+of infinity arithmetic so nothing depends on a browser honoring IEEE inf. Once
+you're inside that subset, though, the GPU is the GPU. Tab or no tab.
 
-The reason is not a bug in our code; it's the compiler, and we traced it to
-the source. Double-double is built on "error-free transforms" like
+## The trick that didn't work, and why that's the interesting part
+
+The original pitch promised a double-double trick: carry each number as a hi/lo
+pair of f32s, emulate about 46 bits of mantissa, push past the 1e-4 tier. We
+built it behind a `--df64` flag, then wrote a kernel-level test designed to
+falsify it. An adversarial cancellation dot product with a known f64 ground
+truth.
+
+It falsified it. On Apple/Metal, df64 and plain f32 accumulation came out
+**byte-identical**. Same error, 7.552e0, to the digit.
+
+That isn't a bug in our code. It's the compiler, and we traced it to the
+source. Double-double is built on error-free transforms like
 `two_prod(a,b): p = a*b; e = fma(a, b, -p)`, where `e` is the exact rounding
-tail of the product. Metal's fast-math is on by default and treats float ops
-as exact/associative, so it proves `fma(a, b, -a*b) == 0` and folds every
-error term to zero at compile time — the double-double collapses back to f32
-before it ever runs. And there is no switch to turn it off: we read through
-wgpu-hal's Metal device code, naga's MSL backend, and the whole public wgpu 30
-surface — none of them expose a fast-math / precise / math-mode control, and
-`MTLCompileOptions.fastMathEnabled` defaults to YES.
+tail of the product. Metal's fast-math is on by default and treats float ops as
+exact and associative, so it proves `fma(a, b, -a*b) == 0` and folds every
+error term to zero at compile time. The double-double collapses back to f32
+before it ever runs.
 
-Two consequences worth stating plainly. First, the *existing* "compensated
-accumulation" (a Neumaier sum in the M0 reduction kernel) has been collapsing
-to plain f32 on Metal since day one, for the same reason — which had zero
-impact on results *precisely because* the CPU-f64 certificate was the real
-guarantee all along, catching what the comment in the shader promised but the
-hardware quietly didn't deliver. Second, even on an IEEE-strict backend where
-the transforms survive, our current reduction still narrows each workgroup's
-double-double partial back to a single f32 before the cross-workgroup combine,
-so a real precision win would need df64-typed scratch buffers end to end, not
-just df64 math inside a kernel. So: **df64 is deferred**, with a written,
-source-level reason and a concrete list of what would have to change to revisit
-it. (We do not claim the one afiro solve where f32 and df64 finished with
-different iteration counts as a df64 "win" — that's chaotic sensitivity to
-rounding order in an iterative method, noise in both directions, not a
-precision gain. The memo explains why.)
+And there's no switch. We read through wgpu-hal's Metal device code, naga's MSL
+backend, and the whole public wgpu 30 surface. None of them expose a fast-math,
+precise, or math-mode control, and `MTLCompileOptions.fastMathEnabled` defaults
+to `YES`.
 
-That's the honest version of "the double-double trick alone is a good post":
-the post is about why it *doesn't* work on the most popular WebGPU backend, and
-how you can prove that from the compiler down rather than guessing.
+Two consequences worth stating plainly. First, the *existing* compensated
+accumulation (a Neumaier sum in the M0 reduction kernel) has been collapsing to
+plain f32 on Metal since day one, for the same reason. That had zero impact on
+results, and precisely because the CPU-f64 certificate was the real guarantee
+all along. It caught what the shader comment promised and the hardware quietly
+didn't deliver. Second, even on an IEEE-strict backend where the transforms
+survive, our reduction still narrows each workgroup's double-double partial
+back to a single f32 before the cross-workgroup combine. A real precision win
+needs df64-typed scratch buffers end to end, not just df64 math inside a
+kernel.
 
-## 7. Benchmarks
+So df64 is deferred, with a written source-level reason and a concrete list of
+what would have to change to revisit it. We also don't claim the one afiro
+solve where f32 and df64 finished with different iteration counts as a df64
+win. That's chaotic sensitivity to rounding order in an iterative method, noise
+in both directions, not a precision gain.
 
-Sundial runs the classic Netlib LP set through a CLI sweep — one row per
+The honest version of "the double-double trick alone is a good post" turned out
+to be this: the post is about why it doesn't work on the most popular WebGPU
+backend, and how you can prove that from the compiler down instead of guessing.
+
+## 20 of 32, and the 12 we were wrong about
+
+Sundial runs the classic Netlib LP set through a CLI sweep. One row per
 instance, each solved on the GPU and then CPU-f64-verified, reported against
-the published Netlib optima. The current split on 32 instances:
+the published Netlib optima. The split on 32 instances:
 
-**20 of 32 reach Optimal** at CPU-f64-verified 1e-4; the other **12 stop at
-`IterationLimit`**, and there are **no parse failures** (down from one in M1 —
-see `blend.mps` below). Among the 20 Optimal rows, the worst relative objective
-error (reported as |obj − known| / (1 + |known|)) against the readme is e226's
-3.6e-1 — which is the sign-convention footnote below, not a real error; every
-other Optimal instance matches the published optimum to better than 1e-3 (worst
-real case: adlittle, 6.7e-4). This
-is up from M1's 19/32 Optimal: the one instance that changed is `blend.mps`,
-which went from an unreadable parse error to a verified solve.
+**20 of 32 reach `Optimal`** at CPU-f64-verified 1e-4. The other **12 stop at
+`IterationLimit`**. There are **no parse failures**, down from 1 in M1.
 
-`blend.mps` is new this milestone: it used to fail the parser on a
-set-name-less RHS line (a real-world MPS corner), and now it parses and solves
-to Optimal (−30.8119660669 against the optima-file −30.812149846, gap within
-the verified mu of 9.98e-5). The instances that don't reach Optimal stop
-honestly at the iteration cap, reported as `IterationLimit`, never dressed up
-as a solve.
+Among the 20 Optimal rows, every instance matches the published optimum to
+better than 1e-3. Worst real case is adlittle at 6.7e-4. The apparent worst,
+e226 at 3.6e-1, is a footnote rather than an error: its Netlib-readme optimum
+uses the opposite sign convention for the objective-row RHS constant, so our
+KKT-certified −11.635074 reads as a large relative error against the readme's
+≈ −18.75. The report annotates that in a note column rather than quietly
+"fixing" the number.
 
-We used to attribute those 12 to the f32 iterates. That was wrong, and the
-correction is worth more than the original claim was. Re-solving all 12 on the
-CPU **f64** reference reproduces every failure — in double precision, where
-there is no 1e-4 floor to hit. What they actually show is step imbalance: one
-residual collapses to machine epsilon while the other stalls orders of
-magnitude above tolerance (agg: primal 1.6e-16 against dual 1.3e-2; sc205:
-primal 8.4e-17 against a gap of 0.77), and the stalled side flips between
-instances, so no single fixed step ratio can serve all of them. The explicit
-path runs with τ=σ and no primal weight, which is precisely the gap. An opt-in
-movement-based ω (PDLP's ‖Δy‖/‖Δx‖ rule) takes the same GPU sweep, at the same
-2M cap, from 20/32 to **30/32 with no status regressions**, and cuts total
-iterations across the already-solving instances by 5.2× (beaconfd alone goes
-1,680,896 → 10,432).
+`blend.mps` is the instance that changed this milestone. It used to fail the
+parser on a set-name-less RHS line, a real-world MPS corner, and now it parses
+and solves to `Optimal` at −30.8119660669 against the optima file's
+−30.812149846.
 
-It ships **off by default**, and the table above is the default-off run, because
-the headline undersells a real cost. Two of the newly-Optimal instances — lotfi
-and bnl1 — land 5.8e-2 and 1.2e-2 from the published optima. Both are honest
-`Optimal`: each passed the independent f64 KKT recheck at its returned point. But
-a KKT residual under 1e-4 does not tightly bound objective error on degenerate
-instances, and those two sit well outside the ≤1e-3 band every row in the table
-above occupies. Trading accuracy you can measure for a status count you can
-advertise is exactly the trade this project refuses to make silently, so the flag
-stays opt-in until that's a deliberate decision rather than a side effect.
+Now the part where we were wrong.
 
-One footnote the report renders itself: **e226**. Its Netlib-readme "known
-optimum" uses the opposite sign convention for the objective-row RHS constant,
-so our KKT-certified −11.635074 shows a large relative error against the
-readme's ≈ −18.75. That's a convention mismatch, not a solver defect; the
-report annotates it in a note column rather than quietly "fixing" the number.
+For two milestones we attributed those 12 `IterationLimit` rows to the f32
+iterates and called it "the documented f32 wall." That was a misdiagnosis, and
+the correction is worth more than the original claim was. Re-solving all 12 on
+the CPU **f64** reference reproduces every failure, in double precision, where
+there is no 1e-4 floor to hit.
 
-**On comparing against published GPU-LP benchmarks:** we looked for overlap
-with the Mittelmann benchmarks (plato.asu.edu/bench.html, the standard
-reference, which does include GPU solvers cuOpt and cuPDLPx). There is none to
-cite honestly. Those benchmarks target data-center-scale instances — the small
-end of their GPU feasibility set (qap15, ~6,331 rows × ~22,275 columns) already
-dwarfs every instance in our classic-Netlib sweep, the large end runs to tens
-of millions of rows and columns, and the GPU solvers there (cuOpt, cuPDLPx) run
-on an NVIDIA B200. None of our 32 instances appear in them, and they publish
-results at different tolerance tiers on different-class hardware. So rather than manufacture a misleading
-apples-to-oranges table, we state our absolute numbers above and point you at
-the plato page: <https://plato.asu.edu/bench.html>. The comparison that *is*
-honest and reproducible is the one anyone can run — open the demo, solve a
-million-variable problem, and time it on your own GPU.
+What they actually show is step imbalance. One residual collapses to machine
+epsilon while the other stalls orders of magnitude above tolerance: agg runs a
+primal of 1.6e-16 against a dual of 1.3e-2, sc205 a primal of 8.4e-17 against a
+gap of 0.77. And the stalled side flips between instances, so no single fixed
+step ratio can serve all of them. The explicit path runs with τ = σ and no
+primal weight, which is exactly the gap.
 
-## 8. Honest limits
+An opt-in movement-based ω (PDLP's ‖Δy‖/‖Δx‖ rule) takes the same GPU sweep, at
+the same 2M cap, from 20/32 to **30 of 32 with no status regressions**, and
+cuts total iterations across the already-solving instances by **5.2×**.
+beaconfd alone goes from 1,680,896 iterations to 10,432.
 
-- **f32 iterates, 1e-4 default tier.** The iterate arithmetic is single
-  precision and the headline tolerance is PDLP's "moderate accuracy" 1e-4 tier.
-  Tighter tolerances are genuinely future work — and per Section 6, the obvious
-  double-double route is blocked on Apple/Metal until wgpu exposes a strict-math
-  control (or you target a Vulkan/DX12 context, and even then the reduction
-  pipeline needs df64 scratch buffers).
-- **Not every Netlib instance reaches Optimal in the default configuration.**
-  The 12 `IterationLimit` rows are honest non-solves, not silent failures. We
-  originally called them the f32 wall; that was a misdiagnosis, and testing it
-  in f64 disproved it (Section 7). The real cause is an unweighted primal/dual
-  step split on the explicit path — a solver gap, not a precision limit. An
-  opt-in movement-based ω closes 10 of the 12 on the shipping GPU engine
-  (30/32, no status regressions), and we left it opt-in on purpose: two of the
-  instances it converts land 1–6% off the published optima, which is a worse
-  trade than the headline count suggests.
-- **No presolve.** We evaluated the recent GPU-presolve work (Cederberg & Boyd,
-  arXiv 2604.23951) and deferred it: it only applies to the explicit-CSR path
-  (not the matrix-free transport path), its wins concentrate in a minority of
-  large/redundant instances, and the postsolve mapping that keeps certificate
-  honesty intact is a multi-week correctness-critical effort. Deferred to M3+,
-  with the reasoning written down.
-- **Metal fast-math caveat.** Any "compensated accumulation" is collapsed to
-  plain f32 on the Metal backend (Section 6). The CPU-f64 certificate is what
-  makes this safe; don't read the shader comments as a precision guarantee.
-- **Small LPs still belong to simplex on a CPU.** A first-order GPU method pays
-  off at scale; the million-variable transport hero is where the architecture
-  earns its keep, not afiro. Simplex will beat us on the little ones and that's
-  expected.
-- **WebGPU availability floor.** You need a browser with WebGPU: Chrome/Edge
-  113+, Firefox 141+, Safari 26+. Timing convention: reported `solve_ms` is the
-  solve loop only, excluding host preprocessing (Ruiz scaling + power-iteration
-  norm), consistent across the CPU and GPU engines.
+It ships **off by default**, and the table above is the default-off run,
+because the headline undersells a real cost. Two of the newly-Optimal
+instances, lotfi and bnl1, land 5.8e-2 and 1.2e-2 from the published optima.
+Both are honest `Optimal`: each passed the independent f64 KKT recheck at its
+returned point. But a KKT residual under 1e-4 doesn't tightly bound objective
+error on degenerate instances, and those two sit well outside the 1e-3 band
+every row in the table occupies. Trading accuracy you can measure for a status
+count you can advertise is the exact trade this project refuses to make
+silently, so the flag stays opt-in.
 
-## 9. Try it / use it
+**On comparing against published GPU-LP benchmarks.** We looked for overlap
+with the Mittelmann benchmarks at plato.asu.edu, the standard reference, which
+does include cuOpt and cuPDLPx. There's none to cite honestly. Those benchmarks
+target data-center instances: the small end of their GPU feasibility set
+(qap15, about 6,331 rows by 22,275 columns) already dwarfs every instance in
+our classic-Netlib sweep, the large end runs to tens of millions of rows and
+columns, and the GPU solvers there run on an NVIDIA B200. None of our 32
+instances appear in them, at different tolerance tiers on different-class
+hardware. Rather than manufacture an apples-to-oranges table, we state absolute
+numbers and point at <https://plato.asu.edu/bench.html>. The comparison that
+*is* honest is the one anyone can run: open the demo, solve a million-variable
+problem, time it on your own GPU.
 
-**In the browser** — nothing to install:
+## Where this breaks
+
+A responsible reading needs the limits stated as plainly as the wins.
+
+**f32 iterates, 1e-4 default tier.** The iterate arithmetic is single precision
+and the headline tolerance is PDLP's "moderate accuracy" tier. Tighter
+tolerances are genuine future work, and per the df64 section the obvious route
+is blocked on Apple/Metal until wgpu exposes a strict-math control.
+
+**Not every Netlib instance solves in the default configuration.** The 12
+`IterationLimit` rows are honest non-solves. The opt-in ω closes 10 of them,
+and we left it opt-in because two of the instances it converts land 1–6% off
+the published optima. That's a worse trade than the headline count suggests.
+
+**No presolve.** We evaluated the recent GPU-presolve work (Cederberg & Boyd,
+arXiv 2604.23951) and deferred it. It only applies to the explicit-CSR path,
+never the matrix-free transport path, its wins concentrate in a minority of
+large redundant instances, and the postsolve mapping that keeps certificate
+honesty intact is multi-week correctness-critical work.
+
+**Metal fast-math caveat.** Any compensated accumulation is collapsed to plain
+f32 on the Metal backend. The CPU-f64 certificate is what makes that safe.
+Don't read the shader comments as a precision guarantee.
+
+**Small LPs still belong to simplex on a CPU.** A first-order GPU method pays
+off at scale. The million-variable transport hero is where the architecture
+earns its keep, not afiro. Simplex beats us on the little ones, and that's
+expected.
+
+**WebGPU availability floor.** You need Chrome or Edge 113+, Firefox 141+, or
+Safari 26+. Reported `solve_ms` is the solve loop only, excluding host
+preprocessing (Ruiz scaling and the power-iteration norm), and that convention
+is consistent across the CPU and GPU engines.
+
+None of those change what the demo does on your machine.
+
+## Try it
+
+**In the browser**, with nothing to install:
 
 > <DEMO_URL>
 
 Pick a preset (blobs, ring, spiral, checker, corners) or draw your own source
-and target masses with the brush; choose a 16×16 or 32×32 grid; watch the three
-live heatmaps (source, mass arriving, target) and the convergence chart. There's
-also a drop-a-file benchmark page: hand it an `.mps` or `.mps.gz` and get an
-honest results table back.
+and target masses with the brush. Choose 16×16 or 32×32. Watch the three live
+heatmaps and the convergence chart. There's a drop-a-file benchmark page too:
+hand it an `.mps` or `.mps.gz` and get an honest results table back. And a taxi
+page that dispatches every open ride in Manhattan from the 2015 TLC record,
+greedily first and then to a CPU-verified optimum.
 
-**As a library** — the solver ships as an npm/WASM package:
+**As a library**, from npm:
 
 ```bash
 npm install sundial-lp
@@ -300,34 +299,31 @@ npm install sundial-lp
 
 ```js
 import init, { solveMps } from "sundial-lp";
-await init();                                    // load the wasm module
+await init();
 
-// solveMps(mpsText, tol, onProgress) runs on the browser's GPU and
-// resolves once the result has been re-verified in f64 on the CPU.
+// Runs on the browser's GPU, resolves once the result has been
+// re-verified in f64 on the CPU.
 const result = await solveMps(mpsText, 1e-4, (p) => {
-  // p = { iter, rel_primal, rel_dual, rel_gap, ms_per_iter } each check
+  // p = { iter, rel_primal, rel_dual, rel_gap, ms_per_iter }
 });
-// result = { status, objective, iterations, ... }
 ```
 
-Private data never leaves the browser — the optimization runs client-side on
-the user's own GPU, with no backend.
+Private data never leaves the browser. The optimization runs client-side on the
+user's own GPU, with no backend.
 
-**On the command line** — native Metal/Vulkan/DX12 via `wgpu`:
+**On the command line**, native Metal, Vulkan, or DX12 through `wgpu`:
 
 ```bash
-# solve an MPS file
-cargo run -p sundial-cli --release -- solve path/to/model.mps
+cargo install sundial-cli
 
-# the 1M-variable transport hero (two 32x32 grids, ~9.4s on an M4 Pro)
-cargo run -p sundial-cli --release -- transport --grid 32
-
-# sweep a directory of instances into a report
-cargo run -p sundial-cli --release -- bench bench/netlib --out results.csv
-cargo run -p sundial-cli --release -- report results.csv --out report.md
+sundial solve path/to/model.mps
+sundial transport --grid 32                          # 1,048,576 variables
+sundial bench bench/netlib --out results.csv
+sundial report results.csv --out report.md
 ```
 
-Source is Rust + `wgpu` + WGSL, MIT OR Apache-2.0. The whole thing is one
-codebase that runs on the CPU (f64 reference), on a native GPU, and in a
-browser tab — and it re-verifies every optimum in double precision before it
-tells you it's optimal.
+Source is Rust, `wgpu`, and WGSL, dual-licensed MIT OR Apache-2.0. One codebase
+runs on the CPU in f64, on a native GPU, and in a browser tab.
+
+Open the demo, pick 32×32, and watch the primal residual come down. That curve
+is the whole argument.

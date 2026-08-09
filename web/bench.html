@@ -19,10 +19,16 @@
     </style>
   </head>
   <body>
-    <h1>Sundial — benchmarks</h1>
-    <p>Solve LP instances on <em>your</em> GPU and compare with published solver times for the
-       same instances at <a href="https://plato.asu.edu/bench.html">plato.asu.edu</a>.
-       Reported tolerances are CPU-f64-verified. <a href="./">← transport hero</a></p>
+    <h1>Sundial benchmarks</h1>
+    <p>Solve real linear programs on <em>your</em> GPU. Pick one of the classic
+       <a href="https://www.netlib.org/lp/data/">Netlib</a> test instances below, or drop in
+       your own file. <b>MPS</b> is the standard text format for writing an LP down, and
+       most solvers export it.</p>
+    <p>Every tolerance in the table is re-verified on the CPU in f64 before it's reported.
+       A status of <code>IterationLimit</code> means the solver ran out of budget and is
+       saying so, rather than guessing. Published times for the same instances on other
+       solvers are at <a href="https://plato.asu.edu/bench.html">plato.asu.edu</a>.
+       <a href="./">← transport hero</a> &nbsp; <a href="taxi.html">taxi demo →</a></p>
     <p id="nogpu" hidden>This browser has no WebGPU. Chrome/Edge 113+, Firefox 141+, or Safari 26+ required.</p>
     <p>
       <select id="instance">

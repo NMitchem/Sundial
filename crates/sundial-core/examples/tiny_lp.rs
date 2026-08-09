@@ -21,9 +21,13 @@
 //!               tables, chairs >= 0
 //! ```
 //!
-//! The answer is 4 tables and 2 chairs, for $26 — which uses every plank and
-//! every hour exactly. Real problems have millions of variables instead of
-//! two, which is the point of solving them on a GPU.
+//! The answer is 4 tables and 2 chairs, for $26. That uses every plank and
+//! every hour exactly, which is typical: the best answer in a linear program
+//! almost always sits where some of the limits are hit dead-on.
+//!
+//! You could solve this one by hand. The reason to build a solver is that the
+//! same shape of question turns up with millions of variables instead of two,
+//! and at that size you want a GPU.
 
 use sundial_core::problem::{CsrMatrix, LpProblem, SolveOptions, SolveStatus};
 
@@ -38,8 +42,8 @@ fn main() {
     //
     // CSR stores only non-zeros: `indptr` marks where each row starts in
     // `indices`/`values`. Every entry here happens to be non-zero, which is
-    // unusual — real constraint matrices are mostly zeros, and that sparsity
-    // is what makes large problems tractable.
+    // unusual. Real constraint matrices are mostly zeros, and that sparsity is
+    // what makes large problems tractable at all.
     let constraints = CsrMatrix {
         n_rows: 2,
         n_cols: 2,
@@ -61,9 +65,9 @@ fn main() {
     .expect("dimensions and bounds are consistent");
 
     // Solve on the CPU in f64. This path needs no GPU, so it runs anywhere.
-    // The last argument is a progress callback; ignore it for a problem this
-    // small. For the GPU, use `sundial_core::gpu::engine::solve_gpu`, which is
-    // async — see `crates/sundial-cli/src/main.rs` for a worked call.
+    // The last argument is a progress callback, which you can ignore at this
+    // size. For the GPU, use `sundial_core::gpu::engine::solve_gpu` instead.
+    // It's async, and `crates/sundial-cli/src/main.rs` has a worked call.
     let options = SolveOptions::default();
     let solution = sundial_core::reference::solve(&problem, &options, &mut |_| {});
 
@@ -78,7 +82,8 @@ fn main() {
         solution.stats.verified.mu(),
     );
 
-    // `Optimal` is never returned on the solver's say-so alone: it means an
-    // independent f64 KKT check passed at exactly the point printed above.
+    // `Optimal` is never returned on the solver's say-so alone. It means an
+    // independent f64 KKT check passed at exactly the point printed above. If
+    // that check fails you get `IterationLimit`, not an optimistic guess.
     assert_eq!(solution.status, SolveStatus::Optimal);
 }

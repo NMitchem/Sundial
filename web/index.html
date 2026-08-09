@@ -18,10 +18,16 @@
   </head>
   <body>
     <h1>Sundial</h1>
-    <p>Optimal transport with <span id="nvars">1,048,576 variables</span>, solved live by
-       WebGPU compute shaders on <em>your</em> GPU — no server, no install, no CUDA.
-       Reported tolerances are re-verified on the CPU in f64 — the GPU never grades its
-       own homework. <a href="bench.html">Benchmark page →</a></p>
+    <p>Two pictures made of mass. The left one has to become the right one, and moving
+       mass costs money in proportion to how far it goes. Finding the cheapest way to do
+       that is called <b>optimal transport</b>, and on a pair of 32×32 grids it's a linear
+       program with <span id="nvars">1,048,576 variables</span>: one for every route from
+       a starting square to a destination square.</p>
+    <p>It solves live on <em>your</em> GPU, as WebGPU compute shaders. No server, no
+       install, no CUDA, and nothing leaves your machine. Every tolerance below is
+       re-verified on the CPU in f64 before it's reported, because the GPU never grades
+       its own homework.
+       <a href="bench.html">Benchmark page →</a> &nbsp; <a href="taxi.html">Taxi demo →</a></p>
     <p id="nogpu" hidden>This browser has no WebGPU. Chrome/Edge 113+, Firefox 141+, or Safari 26+ required.</p>
     <p>
       <select id="preset">
@@ -44,14 +50,22 @@
       <button id="solve">Solve on GPU</button>
     </p>
     <div id="grids">
-      <figure><canvas id="src"></canvas><figcaption>source mass</figcaption></figure>
-      <figure><canvas id="arriving"></canvas><figcaption>mass arriving (live)</figcaption></figure>
-      <figure><canvas id="tgt"></canvas><figcaption>target mass</figcaption></figure>
+      <figure><canvas id="src"></canvas><figcaption>where the mass starts</figcaption></figure>
+      <figure><canvas id="arriving"></canvas><figcaption>where it's arriving (live)</figcaption></figure>
+      <figure><canvas id="tgt"></canvas><figcaption>where it has to end up</figcaption></figure>
     </div>
     <div id="hud">
       <span id="gpu"></span><span id="iter"></span><span id="msit"></span><span id="status"></span>
     </div>
     <canvas id="chart" width="1600" height="640"></canvas>
+    <p id="chart-legend" style="font-size:12px; color:#888">
+      Three measures of how wrong the current answer still is, on a log scale.
+      <b style="color:#e4572e">Primal residual</b> is how much the plan breaks the rules,
+      <b style="color:#17bebb">dual residual</b> is how far the prices are from consistent,
+      and <b style="color:#76b041">duality gap</b> is how far the cost is from the best
+      possible cost. The dashed line is the tolerance. All three have to get under it, and
+      then the CPU checks the answer again in double precision before it says "Optimal".
+    </p>
     <p id="result"></p>
     <script type="module" src="/src/main.ts"></script>
   </body>

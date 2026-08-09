@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Sundial is pre-1.0. Only the latest release on `main` — and the latest published
-`sundial-lp` npm package — receive security fixes.
+Sundial is pre-1.0. Security fixes go to the latest release on `main` and the
+latest published `sundial-lp` npm package. Nothing older is supported.
 
 ## Reporting a vulnerability
 
@@ -25,19 +25,19 @@ account system, and stores no user data. The realistic attack surface is:
   unbounded allocation, or hangs reachable from malformed MPS are in scope.
 - **The `sundial-lp` wasm package.** Memory-safety or sandbox-escape issues in
   the wasm bindings (`crates/sundial-web`) are in scope.
-- **Supply chain.** Problems with the published npm tarball's contents —
-  unexpected files, wrong integrity metadata — are in scope.
+- **Supply chain.** Problems with the published npm tarball's contents are in
+  scope: unexpected files, or wrong integrity metadata.
 
 Out of scope:
 
 - **Wrong answers are bugs, not vulnerabilities.** An instance that returns
   `IterationLimit` instead of `Optimal`, or a slow convergence case, belongs in a
-  normal issue. See the "Honest limits" section of `README.md` for the known
-  accuracy ceiling.
+  normal issue. See the "What it can't do yet" section of `README.md` for the
+  known accuracy ceiling.
 - Denial of service from *legitimately* large problems. The solver is expected
   to be slow on hard instances.
-- Issues in GPU drivers, browsers, or wgpu itself — report those upstream,
-  though we appreciate a heads-up if Sundial is a practical trigger.
+- Issues in GPU drivers, browsers, or wgpu itself. Report those upstream, though
+  we appreciate a heads-up if Sundial is a practical trigger.
 
 ## A note on the certificate invariant
 

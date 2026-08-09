@@ -57,7 +57,7 @@ class Demo {
     const gm = totalMiles(this.riders, this.pts.cabs, this.greedy, this.pts.miles_per_unit);
     this.greedyMiles = gm;
     $("phase").textContent =
-      "The obvious way — every rider grabs the nearest free cab. Look at the mess.";
+      "The obvious way. Every rider grabs the nearest free cab, and look at the mess.";
     await animate(900, (t) =>
       this.lines.draw({ from: this.greedy, reveal: Math.ceil(t * this.riders.length), color: RED }),
     );
@@ -83,7 +83,7 @@ class Demo {
     await rollNumber($("miles"), gm, om, 700, " total pickup miles");
     this.renderVerdict(res);
     this.receipts(res, certified);
-    $("poke-hint").textContent = "Tap anywhere in Manhattan — you need a cab.";
+    $("poke-hint").textContent = "Tap anywhere in Manhattan. You need a cab.";
     this.busy = false;
   }
 
@@ -94,7 +94,7 @@ class Demo {
       return;
     }
     if (this.riders.length >= this.pts.cabs.length) {
-      $("poke-hint").textContent = "Cab supply exhausted — every cab in the record is now booked.";
+      $("poke-hint").textContent = "Cab supply exhausted. Every cab in the record is now booked.";
       return;
     }
     this.busy = true;
@@ -105,7 +105,7 @@ class Demo {
     this.lines.setYou(you);
     this.view.renderDots(this.riders, this.pts.cabs, you);
     const nvars = this.riders.length * this.pts.cabs.length;
-    $("poke-hint").textContent = `Re-planning the whole city around you — ${nvars.toLocaleString()} routes…`;
+    $("poke-hint").textContent = `Re-planning the whole city around you: ${nvars.toLocaleString()} routes…`;
     let res: MatchResult;
     try {
       res = await this.solve();
@@ -162,16 +162,16 @@ class Demo {
     if (certified) {
       const perPickup = slackFeet / this.riders.length;
       $("phase").textContent =
-        `${om.toFixed(0)} miles — ${pct.toFixed(0)}% less driving than the obvious way. ` +
+        `${om.toFixed(0)} miles, ${pct.toFixed(0)}% less driving than the obvious way. ` +
         `Proven: no dispatch on Earth beats this by more than ${perPickup.toFixed(1)} ft per pickup.`;
       $("dare").textContent =
         `${pairs(this.riders.length).toLocaleString()} pairs of green routes on screen. Find two that cross. You won't.`;
       $("banner").textContent = "";
     } else {
       $("phase").textContent =
-        `Best routing found: ${om.toFixed(0)} miles — ${pct.toFixed(0)}% less than the obvious way.`;
+        `Best routing found: ${om.toFixed(0)} miles, ${pct.toFixed(0)}% less than the obvious way.`;
       $("banner").textContent =
-        "This run stopped before certification — showing the best routing found, not a proven optimum.";
+        "This run stopped before certification. That's the best routing found, not a proven optimum.";
       $("dare").textContent = "";
     }
   }

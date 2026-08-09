@@ -7,7 +7,7 @@ versioned together from the workspace.
 Numbers here carry the same rule as the rest of the project's docs: no headline without
 its verification basis. See [`docs/STATUS.md`](docs/STATUS.md) for the full record.
 
-## [0.1.0] — unreleased
+## [0.1.0] - unreleased
 
 Initial release. Nothing is published to crates.io or npm yet.
 
@@ -19,12 +19,12 @@ Initial release. Nothing is published to crates.io or npm yet.
   structured problems never materialize a constraint matrix.
 - Ruiz + Pock–Chambolle equilibration, and a CPU f64 reference implementation of the same
   algorithm for cross-checking.
-- Grid-stride kernels throughout; dispatch is capped at 4,096 workgroups.
+- Grid-stride kernels throughout, with dispatch capped at 4,096 workgroups.
 - Movement-based primal weight (`SolveOptions::movement_weight`, CLI `--movement-weight`),
   **opt-in and off by default**. On the GPU Netlib sweep it takes 20/32 → 30/32 `Optimal`
   with 5.2× fewer iterations on instances that already solved, but two newly-`Optimal`
   instances (lotfi, bnl1) land outside the ≤1e-3 objective band the published table
-  guarantees. The default stays off so that claim holds; the adjudication is in
+  guarantees. The default stays off so that claim holds. The adjudication is in
   `docs/STATUS.md`.
 
 ### Verification
@@ -36,9 +36,9 @@ Initial release. Nothing is published to crates.io or npm yet.
 
 ### Interfaces
 
-- `sundial-mps` — MPS parser with no wasm or GPU dependencies.
-- `sundial-cli` — `sundial solve | transport | bench | report`.
-- `sundial-lp` (directory `crates/sundial-web`) — wasm-bindgen bindings and the npm package.
+- `sundial-mps`: MPS parser with no wasm or GPU dependencies.
+- `sundial-cli`: `sundial solve | transport | bench | report`.
+- `sundial-lp` (directory `crates/sundial-web`): wasm-bindgen bindings and the npm package.
 - Web demo: 1M-variable transport hero, drop-a-file benchmark page, and a Manhattan taxi
   matching page built on 2015 NYC TLC data (provenance in [`NOTICE`](NOTICE)).
 
@@ -47,7 +47,7 @@ Initial release. Nothing is published to crates.io or npm yet.
 - **Netlib sweep:** 32/32 parsed, 20/32 verified `Optimal`, 12 honest `IterationLimit`,
   0 parse errors, 0 false status claims. Every `Optimal` instance matches the published
   optimum to better than 1e-3. The `IterationLimit` rows are caused by primal-weight
-  imbalance on the unweighted equilibrated path, not by f32 precision — an earlier "f32
+  imbalance on the unweighted equilibrated path, not by f32 precision. An earlier "f32
   wall" attribution was disproved on the CPU f64 reference (`docs/STATUS.md`). e226
   carries a sign-convention footnote.
 - **Infeasibility detection:** 2 of 6 certified on Netlib's infeasible/unbounded set,
