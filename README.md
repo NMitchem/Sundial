@@ -18,7 +18,7 @@ the tab runs at **0.547 ms**, which is inside measurement noise.
 
 > **Live demo:** <DEMO_URL>
 
-<!-- MEDIA: docs/media/transport-32.gif goes here once recorded (RELEASE.md §3). -->
+![Sundial solving 1,048,576-variable optimal transport in a browser tab](docs/media/transport-32.gif)
 
 <details>
 <summary><b>New to linear programming? Start here.</b></summary>

@@ -102,9 +102,9 @@ Order matters: get the repo public and CI green first, then the demo deploy
 ## 3. Deploy the browser demo (you need its URL for step 5)
 
 The demo is the whole pitch, so get it live before anything else user-facing.
-It's a static Vite build in `web/dist` (two pages: `index.html` transport hero,
-`bench.html` drop-a-file). WebGPU requires HTTPS, which both options below give
-you.
+It's a static Vite build in `web/dist` (three pages: `index.html` transport
+hero, `bench.html` drop-a-file, `taxi.html` Manhattan matching). WebGPU
+requires HTTPS, which both options below give you.
 
 - [ ] Build the demo from a clean checkout. Per the M2 plan, the wasm bindings
   live in `crates/sundial-web` (package `sundial-lp`) after the final task; the
@@ -112,7 +112,7 @@ you.
   web bundle):
   ```bash
   bash scripts/build_npm.sh                          # release wasm build into crates/sundial-web/pkg (gitignored)
-  cd web && npm ci && npm run build                  # emits web/dist (index.html + bench.html + assets)
+  cd web && npm ci && npm run build                  # emits web/dist (index.html + bench.html + taxi.html + assets)
   cd ..
   ```
   (If a step can't find the package, confirm the final npm task rewired `web/`
@@ -122,28 +122,33 @@ you.
   use the Pages UI → "GitHub Actions") that runs the two build commands above
   and publishes `web/dist`. Then enable Pages in repo Settings → Pages. Your
   URL will be `https://<you>.github.io/sundial/`.
-  - Vite serves from `/` by default; for a project Pages path
-    (`/sundial/`) set `base: '/sundial/'` in `web/vite.config.*` (or deploy to a
-    user/org root or a custom domain and skip this).
+  - `web/vite.config.ts` already sets `base: './'`, so a project Pages path
+    (`/sundial/`) resolves its assets without any further change. Leave it
+    alone unless you move to a custom domain and want absolute asset paths.
 - [ ] **Option B, Netlify/Vercel.** Point it at the repo with build command
   `bash scripts/build_npm.sh && cd web && npm ci && npm run build`
   and publish directory `web/dist`. Gives you a clean apex/custom domain.
 - [ ] Open the deployed URL on a real machine and confirm end-to-end **before
   posting**: 32×32 reaches `Optimal (CPU f64 verified)`, the arriving-mass panel
-  converges to the target, and the bench page solves a dropped `.mps`. Try it in
-  Chrome and Safari (the two most common HN visitor browsers). WebGPU floor is
-  Chrome/Edge 113+, Firefox 141+, Safari 26+.
+  matches the target, the bench page solves a dropped `.mps`, and the taxi page
+  runs its matching. Try it in Chrome and Safari (the two most common HN visitor
+  browsers). WebGPU floor is Chrome/Edge 113+, Firefox 141+, Safari 26+.
+  - The arriving-mass panel snaps to the target almost immediately rather than
+    easing into it, because `A·x` is a hard constraint that PDHG satisfies by
+    the first residual check at iteration 64. The rest of the run is the
+    duality gap coming down. That is correct behaviour, not a stalled render.
 - [ ] Record the final URL. This is `<DEMO_URL>`.
-- [ ] **Record the README demo clip.** `README.md` has a placeholder comment
-  (`<!-- MEDIA: docs/media/transport-32.gif -->`) where a recording of the 32x32
-  solve goes. Capture the three heatmaps and the convergence chart from the moment
-  you hit Solve until the status reads `Optimal (CPU f64 verified)`, save it as
-  `docs/media/transport-32.gif`, and replace the comment with:
-  ```markdown
-  ![Sundial solving 1,048,576-variable optimal transport in a browser tab](docs/media/transport-32.gif)
-  ```
-  Keep it under about 5 MB so GitHub renders it inline. If you skip this, delete
-  the placeholder comment rather than shipping a dangling reference.
+- [x] **Record the README demo clip.** Done 2026-08-08:
+  `docs/media/transport-32.gif` is a 1280x982 capture at 15 fps, 2.1 MB, running
+  from the click through to `Optimal (CPU f64 verified)` at iteration 16,000 and
+  holding the verified frame for 1.5 s before it loops. The README now embeds it
+  in place of the old placeholder comment.
+  - If you ever re-record it: screen captures come out variable-framerate, and
+    this one wrote a corrupt tail that made the final verified frame undecodable
+    by default. `ffmpeg -fflags +genpts` recovered it. Check the last frame of
+    the finished gif actually reads `Optimal (CPU f64 verified)` rather than
+    `solving...`, since that status line is the entire point of the clip.
+  - Keep it under about 5 MB so GitHub renders it inline.
 
 ## 4. Publish the npm package (`sundial-lp`)
 
