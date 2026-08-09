@@ -16,7 +16,7 @@ constraint matrix never exists in memory.
 The browser costs you almost nothing. Native runs at 0.59 ms per iteration and
 the tab runs at **0.547 ms**, which is inside measurement noise.
 
-> **Live demo:** <DEMO_URL>
+> **Live demo:**
 
 ![Sundial solving 1,048,576-variable optimal transport in a browser tab](docs/media/transport-32.gif)
 
