@@ -46,7 +46,7 @@ Static JSON → JS coordinate arrays → `solveMatching` → GPU solve with prog
 
 ## Error handling
 
-- **No WebGPU:** `webgpuAvailable()` gates the page; fallback shows a pre-recorded video loop of the snap (also the shareable asset) plus a "works live in Chrome/Edge/Safari" note.
+- **No WebGPU:** `webgpuAvailable()` gates the page; fallback shows a browser-requirements note plus a link to the recording in the README. **Amended 2026-08-08:** this originally specified a pre-recorded video loop of the snap, and the markup shipped referencing `taxi/loop.mp4` with a `taxi/poster.png` poster, but neither capture was ever recorded. The `onerror` handler hid the element, so the one audience this fallback exists for (a visitor whose browser cannot run the solve) was told "here's what it looks like" and shown an empty space. The reference was removed rather than shipped hollow. To restore it, record the loop into `web/public/taxi/` and put the `<video>` element back.
 - **Uncertified solve:** if a run returns anything but verified `Optimal`, show the best-found dispatch with an honest banner and strip all "proven/perfect" copy for that run. No displayed status the CPU verifier didn't grant.
 - **GPU init failure / device lost:** error card with retry. Taps during an in-flight solve are queued, not dropped.
 
