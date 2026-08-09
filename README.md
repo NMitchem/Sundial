@@ -1,6 +1,9 @@
 # Sundial
 
 [![CI](https://github.com/NMitchem/Sundial/actions/workflows/ci.yml/badge.svg)](https://github.com/NMitchem/Sundial/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/sundial-core.svg)](https://crates.io/crates/sundial-core)
+[![npm](https://img.shields.io/npm/v/sundial-lp.svg)](https://www.npmjs.com/package/sundial-lp)
+[![docs.rs](https://docs.rs/sundial-core/badge.svg)](https://docs.rs/sundial-core)
 [![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A linear-programming solver that runs as WebGPU compute shaders, on any GPU:
@@ -51,10 +54,6 @@ the same shape of problem as matching drivers to riders, which is what
 </details>
 
 ## Quick start
-
-> **Not published yet.** `cargo install sundial-cli` and `npm install sundial-lp`
-> are what the install will look like, and neither registry has the packages so
-> far. Build from this repo until they do.
 
 **In a browser.** Nothing to install, and nothing leaves your machine.
 

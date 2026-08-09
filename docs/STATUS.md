@@ -1,6 +1,6 @@
 # Sundial — Project Status
 
-Updated: 2026-08-08 (M2 closed 2026-07-14; taxi demo merged 2026-07-19; repo pushed + CI green, still private and unpublished)
+Updated: 2026-08-08 (M2 closed 2026-07-14; taxi demo merged 2026-07-19; repo public + CI green; npm and crates.io published 2026-08-08; demo deploy and Show HN post still open)
 
 ## Milestones
 
@@ -8,7 +8,7 @@ Updated: 2026-08-08 (M2 closed 2026-07-14; taxi demo merged 2026-07-19; repo pus
 - [x] **M1** — matrix-free `LinOp`; optimal-transport hero at 1,048,576 variables, native + in-browser; drop-a-file benchmark page; CLI Netlib sweep tooling producing the comparison table. **All 13 implementation tasks (1–11 + 6a) complete and review-approved.**
 - [x] **M2** (design: `docs/design/infeasibility-detection.md`) — parser hardening, infeasibility/unboundedness detection, df64 precision experiment, three new transport presets + draw-your-own masses, GPU-presolve literature memo, launch writeup + RELEASE checklist, and the `sundial-lp` npm package. **All 12 implementation tasks complete and review-approved; browser human gate passed 2026-07-14 — M2 closed.** Backlog carried forward into the M3 seeds below.
 
-**Launch bar** (from spec): hero ≥1M vars → 1e-4 interactive on a MacBook; ≥25 Netlib + ≥5 large instances in the table; `npm install` works; writeup done. **Met** — sweep table now covers 32/32 netlib instances (20 Optimal + 12 honest IterationLimit, 0 parse errors), all of them small/medium classic-Netlib; the ≥5-large-instance bar is met by the 1M-variable transport hero, reported separately (M1/M2 results below, `docs/writeup.md`), not by additional rows in that table; `sundial-lp` packs cleanly via `npm pack` (never published — see M2 results); `docs/writeup.md` is a complete Show HN draft with `<DEMO_URL>` as its sole unfilled placeholder.
+**Launch bar** (from spec): hero ≥1M vars → 1e-4 interactive on a MacBook; ≥25 Netlib + ≥5 large instances in the table; `npm install` works; writeup done. **Met** — sweep table now covers 32/32 netlib instances (20 Optimal + 12 honest IterationLimit, 0 parse errors), all of them small/medium classic-Netlib; the ≥5-large-instance bar is met by the 1M-variable transport hero, reported separately (M1/M2 results below, `docs/writeup.md`), not by additional rows in that table; `sundial-lp` packs cleanly via `npm pack` and was published to npm at 0.1.0 on 2026-08-08; `docs/writeup.md` is a complete Show HN draft with `<DEMO_URL>` as its sole unfilled placeholder.
 
 ## M3 (in progress)
 
@@ -191,14 +191,14 @@ loop.mp4/poster.png for the no-WebGPU card are a pending human capture step.
 - `docs/notes/gpu-presolve-memo.md` — GPU-presolve literature memo (Cederberg & Boyd, arXiv 2604.23951) and defer rationale
 - `docs/writeup.md` — Show HN launch draft (`<DEMO_URL>` is the sole placeholder)
 - `CHANGELOG.md` — release-facing summary of 0.1.0 (unreleased), results and caveats attached
-- `RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); §0 (merge + clean-checkout verification), §1 (repo created, pushed) and §2 (CI green) done, everything from §3 (demo deploy) on still unexecuted
+- `docs/RELEASE.md` — human-run publish checklist (repo public → CI → demo deploy → npm publish → post); §0-§2 done, §4/§4b/§4c (npm, crates.io, badges) done 2026-08-08, §3 (demo deploy) and §6 (post the Show HN) still open
 
 ## Known gaps / notes
 
-- Remote is `https://github.com/NMitchem/Sundial` (pushed 2026-07-19). The CI workflow (`.github/workflows/ci.yml`) **has** executed on GitHub runners and passed on its first run (3m20s, ubuntu-latest) — `RELEASE.md` §1–2 are effectively done. The repo is still **private**; making it public is the outstanding step.
-- **CI now has a second job** that builds the demo the way a user would (`wasm-pack build` → `npm ci` → `tsc --noEmit` → `vite build`), closing the gap where a broken wasm binding surface or a stale `types-extra.d.ts` would have passed CI and failed only in a browser. Added 2026-08-08; verified locally, and it needs one green run on a GitHub runner to be trusted.
+- Remote is `https://github.com/NMitchem/Sundial` (pushed 2026-07-19). The repo went **public on 2026-08-08**. The CI workflow (`.github/workflows/ci.yml`) executes on GitHub runners and passes, most recently on `bcaa2f2` (3m26s, ubuntu-latest).
+- **CI now has a second job** that builds the demo the way a user would (`wasm-pack build` → `npm ci` → `tsc --noEmit` → `vite build`), closing the gap where a broken wasm binding surface or a stale `types-extra.d.ts` would have passed CI and failed only in a browser. Added 2026-08-08; it has since had green runs on GitHub runners, so it is trusted.
 - **Git history carries the planning scaffolding, deliberately.** `docs/superpowers/` and `or-project-proposals.md` were dropped from the tree in `30afa64` but remain recoverable via `git show` on the commits that carried them. Reviewed for secrets (none — it is internal planning prose) and **adjudicated 2026-08-08 (user): keep it, no history rewrite.** An unsquashed history is normal for an open-source project.
-- `npm publish` for `sundial-lp` has never been run anywhere — the package exists only as a local, inspected `.tgz` (see M2 results); publishing is a `RELEASE.md` step, not part of this milestone.
+- **Published 2026-08-08.** `sundial-lp` is on npm at 0.1.0, and `sundial-core`, `sundial-mps`, `sundial-cli` and `sundial-lp` are all on crates.io at 0.1.0. docs.rs built every one of them. The M2 note below describing the package as packed-but-unpublished records the state at that milestone, not today's.
 
 ## M3 seeds (carried out of M2, for the next plan)
 

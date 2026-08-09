@@ -41,7 +41,7 @@ bash scripts/fetch_netlib.sh
 
 GPU tests are `#[ignore]`d so CI (GitHub runners, no GPU) stays green; always run them locally with `--include-ignored` before claiming a GPU change works.
 
-**Never run `npm publish`.** The `sundial-lp` package is deliberately packed-but-unpublished; publishing is a human-run step on `RELEASE.md`, as is everything else on that checklist.
+**Never publish a release.** `sundial-lp` is on npm and all four crates are on crates.io at 0.1.0, published by hand on 2026-08-08. Cutting any further release is a human-run step on `docs/RELEASE.md`, as is everything else on that checklist: never run `npm publish` or `cargo publish`.
 
 ## Architecture
 
